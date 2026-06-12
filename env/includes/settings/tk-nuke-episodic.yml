@@ -67,7 +67,7 @@ settings.tk-nuke.episodic.shot_step:
       hook_filter_work_files: default
       hook_filter_publishes: default
       launch_at_startup: true
-      saveas_default_name: scene
+      saveas_default_name: "{Shot}_{Step}"
       saveas_prefer_version_up: true
       show_my_tasks: true
       template_work:         ep_nuke_shot_work

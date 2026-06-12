@@ -7,7 +7,6 @@
 # By accessing, using, copying or modifying this work you indicate your
 # agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
-#
 
 ################################################################################
 
@@ -23,42 +22,6 @@ includes:
 - ./tk-multi-workfiles2.yml
 
 ################################################################################
-
-# asset
-settings.tk-photoshopcc.asset:
-  apps:
-    tk-multi-about:
-      location: "@apps.tk-multi-about.location"
-    tk-multi-pythonconsole:
-      location: "@apps.tk-multi-pythonconsole.location"
-    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
-    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel"
-    tk-multi-workfiles2: "@settings.tk-multi-workfiles2"
-  shelf_favorites:
-  - {app_instance: tk-multi-workfiles2, name: File Open...}
-  location: '@engines.tk-photoshopcc.location'
-
-# asset_step
-settings.tk-photoshopcc.asset_step:
-  apps:
-    tk-multi-about:
-      location: "@apps.tk-multi-about.location"
-    tk-multi-pythonconsole:
-      location: "@apps.tk-multi-pythonconsole.location"
-    tk-multi-loader2: "@settings.tk-multi-loader2.photoshop"
-    tk-multi-publish2: "@settings.tk-multi-publish2.photoshop.asset_step"
-    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
-    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.photoshop"
-    tk-multi-snapshot: "@settings.tk-multi-snapshot.photoshop.asset_step"
-    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.photoshop.asset_step"
-    tk-multi-reviewsubmission: "@settings.tk-multi-reviewsubmission.photoshop"
-
-  shelf_favorites:
-  - {app_instance: tk-multi-workfiles2, name: File Open...}
-  - {app_instance: tk-multi-snapshot, name: Snapshot...}
-  - {app_instance: tk-multi-workfiles2, name: File Save...}
-  - {app_instance: tk-multi-publish2, name: Publish...}
-  location: '@engines.tk-photoshopcc.location'
 
 # project
 settings.tk-photoshopcc.project:

@@ -4,18 +4,25 @@ scene_operation hook for tk-multi-workfiles2 / tk-nuke (episodic context).
 
 Auto-versioning: on 'new' and 'version_up', scans the work area for existing
 v### files and saves to the next available version.
-File naming: 301_010_010_comp_v003.nk
+File naming: 301_001_010_temp_v001.nk
 
-color pipeline (first open only):
-  Read (plates, raw)
-    -> OCIOColorSpace  Camera log -> ACEScg   (update OCIO_CAMERA_INPUT)
-       -> OCIOColorSpace  ACEScg -> AWG/Output
-          -> OCIOFileTransform  per-shot CDL  (plates/301_010_010.cc)
-             -> OCIOFileTransform  show LUT   (color/luts/show.cube)
-                -> Viewer  viewerProcess=None
+Color pipeline (first open only):
+  Builds a working node graph with:
+    - Read node for camera plates (raw, LogC4 input)
+    - OCIOColorSpace: LogC4 -> ACEScg
+    - Dot (labelled "ACEScg working")
+    - Merge2 <- Read node for VFX pull placeholder (raw, ACEScg)
+    - Dot (labelled "to Write")
+    - Write node (EXR, raw/ACEScg, no bake)
+    - Viewer (OCIO display transform handles LogC4->CDL->LUT->Rec.709)
+
+  Artists work in ACEScg. The viewer LUT handles display.
+  EXR renders are output in ACEScg linear - no color baked in.
+  Review QTs are generated externally from the EXR renders.
 
 OCIO config: ACES 1.3
-Update OCIO_CAMERA_INPUT to match your camera log:
+Update OCIO_CAMERA_INPUT to match your camera:
+  ARRI LogC4  : "Input - ARRI - Curve - LogC4 - EI800"
   ARRI LogC3  : "Input - ARRI - Curve - LogC3 - EI800"
   RED Log3G10 : "Input - RED - Curve - Log3G10"
   Sony SLog3  : "Input - Sony - Curve - SLog3 - SGamut3"
@@ -32,8 +39,6 @@ HookClass = sgtk.get_hook_baseclass()
 
 OCIO_CAMERA_INPUT = "Input - ARRI - Curve - LogC4 - EI800"
 OCIO_ACES_WORKING = "ACES - ACEScg"
-OCIO_LOGC4_OUTPUT = "Input - ARRI - Curve - LogC4 - EI800"
-OCIO_AWG_OUTPUT   = "Output - Rec.709"
 
 
 class SceneOperation(HookClass):
@@ -59,7 +64,8 @@ class SceneOperation(HookClass):
             old = nuke.root().name()
             nuke.scriptSaveAs(file_path, overwrite=1)
             if old != file_path:
-                engine.save_context_to_script()
+                if hasattr(engine, "save_context_to_script"):
+                    engine.save_context_to_script()
 
         elif operation == "reset":
             nuke.scriptClear()
@@ -70,7 +76,8 @@ class SceneOperation(HookClass):
             resolved = self._resolve_new_path(context)
             self._ensure_dir(resolved)
             nuke.scriptSaveAs(resolved, overwrite=0)
-            engine.save_context_to_script()
+            if hasattr(engine, "save_context_to_script"):
+                engine.save_context_to_script()
             if self._is_first_version(context):
                 self._build_color_template(context)
                 nuke.scriptSave()
@@ -80,8 +87,13 @@ class SceneOperation(HookClass):
             resolved = self._resolve_next_version(context)
             self._ensure_dir(resolved)
             nuke.scriptSaveAs(resolved, overwrite=0)
-            engine.save_context_to_script()
+            if hasattr(engine, "save_context_to_script"):
+                engine.save_context_to_script()
             return resolved
+
+    # -------------------------------------------------------------------------
+    # Template resolution helpers
+    # -------------------------------------------------------------------------
 
     def _work_template(self, context):
         return self.parent.sgtk.templates["ep_nuke_shot_work"]
@@ -130,107 +142,6 @@ class SceneOperation(HookClass):
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
 
-    def _build_color_template(self, context):
-        tk     = self.parent.sgtk
-        fields = self._fields(context)
-
-        plate_path = self._safe_resolve(tk, "ep_shot_plates",   fields, "PLACEHOLDER/plates/plate.####.exr")
-        cdl_path   = self._safe_resolve(tk, "ep_shot_cdl",      fields, "PLACEHOLDER/plates/shot.cdl")
-        lut_path   = self._safe_resolve(tk, "ep_shot_show_lut", fields, "color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube")
-
-        plate_ok = os.path.exists(os.path.dirname(plate_path))
-        cdl_ok   = os.path.exists(cdl_path)
-        lut_ok   = os.path.exists(lut_path)
-
-        def p(s): return s.replace("\\", "/")
-
-        x, y = 200, 100
-
-        # ── Camera plates Read (LogC4 - convert to ACEScg) ────────────────
-        read_plates = nuke.createNode("Read", inpanel=False)
-        read_plates["file"].setValue(p(plate_path))
-        read_plates["raw"].setValue(True)
-        read_plates["colorspace"].setValue("raw")
-        read_plates["label"].setValue("CAMERA PLATES (LogC4)\n[value file]")
-        read_plates.setXYpos(x - 150, y)
-
-        cs_logc4 = nuke.createNode("OCIOColorSpace", inpanel=False)
-        cs_logc4.setInput(0, read_plates)
-        cs_logc4["in_colorspace"].setValue(OCIO_CAMERA_INPUT)
-        cs_logc4["out_colorspace"].setValue(OCIO_ACES_WORKING)
-        cs_logc4["label"].setValue("LogC4 → ACEScg")
-        cs_logc4.setXYpos(x - 150, y + 120)
-
-        # ── VFX pull Read (already ACEScg - no conversion) ────────────────
-        read_vfx = nuke.createNode("Read", inpanel=False)
-        read_vfx["file"].setValue("REPLACE_WITH_VFX_PATH.####.exr")
-        read_vfx["raw"].setValue(True)
-        read_vfx["colorspace"].setValue("raw")
-        read_vfx["label"].setValue("VFX PULL (ACEScg)\n[value file]")
-        read_vfx.setXYpos(x + 150, y)
-
-        # ── Merge plates + VFX in ACEScg ──────────────────────────────────
-        y += 240
-        merge = nuke.createNode("Merge2", inpanel=False)
-        merge.setInput(0, cs_logc4)
-        merge.setInput(1, read_vfx)
-        merge["label"].setValue("Working: ACEScg")
-        merge.setXYpos(x, y)
-
-        # ── Output: ACEScg → LogC4 ────────────────────────────────────────
-        y += 120
-        cs_out = nuke.createNode("OCIOColorSpace", inpanel=False)
-        cs_out.setInput(0, merge)
-        cs_out["in_colorspace"].setValue(OCIO_ACES_WORKING)
-        cs_out["out_colorspace"].setValue(OCIO_LOGC4_OUTPUT)
-        cs_out["label"].setValue("ACEScg → LogC4 (output)")
-        cs_out.setXYpos(x, y)
-
-        # ── CDL (per-shot grade in LogC4) ─────────────────────────────────
-        y += 120
-        cdl = nuke.createNode("OCIOFileTransform", inpanel=False)
-        cdl.setInput(0, cs_out)
-        cdl["file"].setValue(p(cdl_path))
-        cdl["direction"].setValue("forward")
-        cdl["interpolation"].setValue("linear")
-        cdl["label"].setValue("Shot CDL\n[value file]")
-        cdl.setXYpos(x, y)
-        if not cdl_ok:
-            nuke.warning("[color] CDL not found: %s" % cdl_path)
-
-        # ── Show LUT (LogC4 → Rec.709) ────────────────────────────────────
-        y += 120
-        lut = nuke.createNode("OCIOFileTransform", inpanel=False)
-        lut.setInput(0, cdl)
-        lut["file"].setValue(p(lut_path))
-        lut["direction"].setValue("forward")
-        lut["interpolation"].setValue("tetrahedral")
-        lut["label"].setValue("Show LUT → Rec.709\n[value file]")
-        lut.setXYpos(x, y)
-        if not lut_ok:
-            nuke.warning("[color] Show LUT not found: %s" % lut_path)
-
-        # ── Viewer (display in Rec.709, working space ACEScg) ─────────────
-        y += 120
-        viewer = nuke.createNode("Viewer", inpanel=False)
-        viewer.setInput(0, lut)
-        viewer["viewerProcess"].setValue("None")
-        viewer["label"].setValue("Rec.709 output")
-        viewer.setXYpos(x, y)
-
-        nuke.message(
-            "Color pipeline loaded.\n\n"
-            "Working space: ACEScg\n\n"
-            "Camera Plates : LogC4 → ACEScg on read\n  %s\n\n"
-            "VFX Pulls : Replace path in VFX PULL Read\n  (raw read, already ACEScg)\n\n"
-            "Output chain: ACEScg → LogC4 → CDL → Show LUT → Rec.709\n\n"
-            "CDL : %s\n  %s\n\n"
-            "LUT : %s\n  %s"
-            % (plate_path,
-               "OK" if cdl_ok else "NOT FOUND", cdl_path,
-               "OK" if lut_ok else "NOT FOUND", lut_path)
-        )
-
     @staticmethod
     def _safe_resolve(tk, template_name, fields, fallback):
         try:
@@ -240,3 +151,121 @@ class SceneOperation(HookClass):
         except Exception as exc:
             nuke.warning("[color] Could not resolve '%s': %s" % (template_name, exc))
             return fallback
+
+    @staticmethod
+    def _p(path):
+        """Normalise path separators to forward slashes for Nuke."""
+        return path.replace("\\", "/")
+
+    # -------------------------------------------------------------------------
+    # Color template builder
+    # -------------------------------------------------------------------------
+
+    def _build_color_template(self, context):
+        tk     = self.parent.sgtk
+        fields = self._fields(context)
+
+        shot = fields.get("Shot", "SHOT")
+
+        plate_path = self._safe_resolve(
+            tk, "ep_shot_plates", fields,
+            "PLACEHOLDER/plates/%s.####.exr" % shot)
+
+        render_template = tk.templates.get("ep_nuke_shot_render_work")
+        if render_template:
+            render_fields = dict(fields)
+            render_fields["nuke.output"] = "beauty"
+            render_fields["version"] = 1
+            try:
+                render_path = render_template.apply_fields(render_fields)
+            except Exception:
+                render_path = "PLACEHOLDER/render/%s_beauty_v001.####.exr" % shot
+        else:
+            render_path = "PLACEHOLDER/render/%s_beauty_v001.####.exr" % shot
+
+        # ── Layout constants ──────────────────────────────────────────────
+        x0, y0  = 0, 0
+        x_vfx   = 300
+        x_main  = 0
+        y_step  = 130
+
+        y = y0
+
+        # ── Read: Camera plates (raw, LogC4) ──────────────────────────────
+        read_plates = nuke.createNode("Read", inpanel=False)
+        read_plates["file"].setValue(self._p(plate_path))
+        read_plates["raw"].setValue(True)
+        read_plates["colorspace"].setValue("raw")
+        read_plates["label"].setValue("CAMERA PLATES\n(raw LogC4)\n[value file]")
+        read_plates.setXYpos(x_main, y)
+
+        # ── OCIOColorSpace: LogC4 -> ACEScg ───────────────────────────────
+        y += y_step
+        cs_in = nuke.createNode("OCIOColorSpace", inpanel=False)
+        cs_in.setInput(0, read_plates)
+        cs_in["in_colorspace"].setValue(OCIO_CAMERA_INPUT)
+        cs_in["out_colorspace"].setValue(OCIO_ACES_WORKING)
+        cs_in["label"].setValue("LogC4 → ACEScg")
+        cs_in.setXYpos(x_main, y)
+
+        # ── Dot: ACEScg working ───────────────────────────────────────────
+        y += y_step
+        dot_working = nuke.createNode("Dot", inpanel=False)
+        dot_working.setInput(0, cs_in)
+        dot_working["label"].setValue("ACEScg working")
+        dot_working.setXYpos(x_main + 34, y)
+
+        # ── Read: VFX pull placeholder (raw, already ACEScg) ─────────────
+        read_vfx = nuke.createNode("Read", inpanel=False)
+        read_vfx["file"].setValue("REPLACE_WITH_VFX_PULL_PATH.####.exr")
+        read_vfx["raw"].setValue(True)
+        read_vfx["colorspace"].setValue("raw")
+        read_vfx["label"].setValue("VFX PULL\n(raw ACEScg — no conversion)\n[value file]")
+        read_vfx.setXYpos(x_vfx, y - y_step)
+
+        # ── Merge: plates + VFX in ACEScg ────────────────────────────────
+        y += y_step
+        merge = nuke.createNode("Merge2", inpanel=False)
+        merge.setInput(0, dot_working)
+        merge.setInput(1, read_vfx)
+        merge["label"].setValue("Working: ACEScg")
+        merge.setXYpos(x_main, y)
+
+        # ── Dot: to Write ─────────────────────────────────────────────────
+        y += y_step
+        dot_write = nuke.createNode("Dot", inpanel=False)
+        dot_write.setInput(0, merge)
+        dot_write["label"].setValue("to Write")
+        dot_write.setXYpos(x_main + 34, y)
+
+        # ── Write: EXR in ACEScg (no color bake) ─────────────────────────
+        y += y_step
+        write = nuke.createNode("Write", inpanel=False)
+        write.setInput(0, dot_write)
+        write["file"].setValue(self._p(render_path))
+        write["file_type"].setValue("exr")
+        write["raw"].setValue(True)
+        write["colorspace"].setValue("raw")
+        write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[value file]")
+        write.setXYpos(x_main, y)
+
+        # ── Viewer ────────────────────────────────────────────────────────
+        y += y_step
+        viewer = nuke.createNode("Viewer", inpanel=False)
+        viewer.setInput(0, dot_write)
+        viewer["label"].setValue("Display via OCIO viewer LUT")
+        viewer.setXYpos(x_main, y)
+
+        nuke.message(
+            "Color pipeline loaded for %s.\n\n"
+            "Working space : ACEScg\n\n"
+            "Camera Plates : %s\n"
+            "  → raw read, LogC4 converted to ACEScg on input\n\n"
+            "VFX Pulls : Replace path in VFX PULL Read node\n"
+            "  → raw read, already ACEScg — no conversion needed\n\n"
+            "Write node : EXR in ACEScg linear — no color baked in\n"
+            "  → %s\n\n"
+            "Review QTs are generated externally from EXR renders.\n"
+            "Viewer display is handled by the OCIO viewer LUT."
+            % (shot, plate_path, render_path)
+        )

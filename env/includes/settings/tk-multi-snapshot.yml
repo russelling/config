@@ -65,8 +65,8 @@ settings.tk-multi-snapshot.maya.asset_step:
 
 # shot step
 settings.tk-multi-snapshot.maya.shot_step:
-  template_snapshot: maya_shot_snapshot
-  template_work: maya_shot_work
+  template_snapshot: ep_maya_shot_snapshot
+  template_work: ep_maya_shot_work
   location: "@apps.tk-multi-snapshot.location"
 
 ################################################################################
