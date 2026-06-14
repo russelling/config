@@ -457,9 +457,6 @@ editorial_to_editorial_movie:
 show_logo:
     definition: 'shots/GLOBALS/logo/teardrop.png'
 
-# Render-complete flag files, written alongside the EXR sequence
-ep_nuke_shot_render_flag:
-    definition: '@shot_base/render/work/{Shot}_{Step}_{nuke.output}_v{version}/.render_complete_{Shot}_{Step}_{nuke.output}_v{version}.json'
 
     # Render-complete flag file written by Nuke after render finishes
     ep_nuke_shot_render_flag:
