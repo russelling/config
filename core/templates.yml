@@ -426,6 +426,20 @@ paths:
         definition: '@asset_root/publish/caches/{Asset}_{name}_v{version}.abc'
 
 
+
+    # ── QT Review Pipeline ───────────────────────────────────────────────────
+    editorial_to_editorial_area:
+        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}'
+
+    editorial_to_editorial_movie:
+        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}_{nuke.output}_v{version}.mov'
+
+    show_logo:
+        definition: 'shots/GLOBALS/logo/teardrop.png'
+
+    ep_nuke_shot_render_flag:
+        definition: '@shot_base/render/work/{Shot}_{Step}_{nuke.output}_v{version}/.render_complete_{Shot}_{Step}_{nuke.output}_v{version}.json'
+
 strings:
     nuke_shot_version_name: "{Shot}_{Step}_{nuke.output}_v{version}.{iteration}"
     nuke_quick_shot_version_name: "{Shot}_{Step}_quick_{iteration}"
@@ -437,27 +451,3 @@ strings:
 
 
 
-##############################################################################
-# ADDITIONS FOR QT REVIEW PIPELINE
-# Add these to core/templates.yml
-##############################################################################
-
-
-# -- New path templates (add to the `paths:` section) ----------------------
-
-# Dated editorial drop folder - all QTs for a given day land here regardless
-# of source shot, for editorial to pull into the cut.
-editorial_to_editorial_area:
-    definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}'
-
-editorial_to_editorial_movie:
-    definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}_{nuke.output}_v{version}.mov'
-
-# Global logo / slate assets, shared across the show
-show_logo:
-    definition: 'shots/GLOBALS/logo/teardrop.png'
-
-
-    # Render-complete flag file written by Nuke after render finishes
-    ep_nuke_shot_render_flag:
-        definition: '@shot_base/render/work/{Shot}_{Step}_{nuke.output}_v{version}/.render_complete_{Shot}_{Step}_{nuke.output}_v{version}.json'
