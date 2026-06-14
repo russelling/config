@@ -35,6 +35,16 @@ import glob
 import nuke
 import sgtk
 
+try:
+    import os as _os, sys as _sys
+    _hooks_dir = _os.path.dirname(_os.path.abspath(__file__))
+    if _hooks_dir not in _sys.path:
+        _sys.path.insert(0, _hooks_dir)
+    import render_complete_callback
+    render_complete_callback.register()
+except Exception as _exc:
+    nuke.warning("[render_complete] Could not register callback: %s" % _exc)
+
 HookClass = sgtk.get_hook_baseclass()
 
 OCIO_CAMERA_INPUT = "Input - ARRI - Curve - LogC4 - EI800"

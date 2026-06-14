@@ -14,6 +14,7 @@ includes:
 - ./includes/settings/tk-aftereffects.yml
 - ./includes/settings/tk-shell.yml
 - ./includes/settings/tk-shotgun.yml
+- ./includes/unreal/settings/tk-unreal.yml
 
 engines:
   tk-desktop2:     "@settings.tk-desktop2.all"
@@ -22,5 +23,6 @@ engines:
   tk-aftereffects: "@settings.tk-aftereffects.shot_step"
   tk-shell:        "@settings.tk-shell.shot_step"
   tk-shotgun:      "@settings.tk-shotgun.shot_step"
+  tk-unreal: "@settings.tk-unreal.shot_step"
 
 frameworks: "@frameworks"

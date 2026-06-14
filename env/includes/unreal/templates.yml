@@ -1,0 +1,61 @@
+# Buffalo VFX - Unreal templates
+# Add to core/templates.yml via:
+#   include: ../env/includes/unreal/templates.yml
+
+keys:
+    # Used by the Loader in Unreal
+    ue_sg_asset_type:
+        type: str
+        shotgun_entity_type: Asset
+        shotgun_field_name: sg_asset_type
+    ue_sg_asset_name:
+        type: str
+        shotgun_entity_type: Asset
+        shotgun_field_name: code
+    ue_sg_shot_name:
+        type: str
+        shotgun_entity_type: Shot
+        shotgun_field_name: code
+    ue_sg_sequence_name:
+        type: str
+        shotgun_entity_type: Shot
+        shotgun_field_name: sg_sequence
+    # Used by Movie Publish in Unreal
+    ue_level_sequence:
+        type: str
+    ue_world:
+        type: str
+    # Movie extension - mov on Mac/Linux, avi on Windows
+    ue_mov_ext:
+        type: str
+        choices:
+            mov: Quicktime Movie (.mov)
+            avi: Audio Video Interleaved (.avi)
+
+paths:
+    # FBX exports for Unreal loading (from Maya asset publishes)
+    unreal.maya_asset_fbx_publish:
+        definition: '@asset_root/publish/fbx/{name}.v{version}.fbx'
+
+    # Turntable review renders from Unreal (Maya asset pipeline)
+    unreal.maya_turntable_render:
+        definition: '@asset_root/work/images/{name}_turntable_v{version}.{ue_mov_ext}'
+    unreal.maya_turntable_publish:
+        definition: '@asset_root/review/{Asset}_{name}_turntable_v{version}.{ue_mov_ext}'
+
+    # Movie publish from Unreal (level sequence render)
+    unreal.movie_publish:
+        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{ue_level_sequence}_{ue_world}.v{version}.{ue_mov_ext}'
+
+    # Generic asset export placeholder from Unreal
+    unreal.asset_publish:
+        definition: 'assets/unreal/exports/{YYYY}_{MM}_{DD}/{name}.fbx'
+
+strings:
+    # Content browser import paths for Loader
+    unreal_loader_asset_path: "/Game/Assets/{ue_sg_asset_type}/{ue_sg_asset_name}/"
+    unreal_loader_asset_name: "{ue_sg_asset_name}_{name}"
+    unreal_loader_shot_path: "/Game/Cinematics/Sequences/{ue_sg_sequence_name}/{ue_sg_shot_name}/"
+    unreal_loader_shot_name: "{ue_sg_shot_name}_{name}"
+    unreal_loader_project_path: "/Game/Assets/"
+    unreal_loader_project_name: "{name}"

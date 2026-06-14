@@ -10,6 +10,7 @@ includes:
 - ./includes/settings/tk-aftereffects.yml
 - ./includes/settings/tk-shell.yml
 - ./includes/settings/tk-shotgun.yml
+- ./includes/unreal/settings/tk-unreal.yml
 
 engines:
   tk-desktop:      "@settings.tk-desktop.project"
@@ -19,5 +20,6 @@ engines:
   tk-aftereffects: "@settings.tk-aftereffects.project"
   tk-shell:        "@settings.tk-shell.project"
   tk-shotgun:      "@settings.tk-shotgun.project"
+  tk-unreal:       "@settings.tk-unreal.project"
 
 frameworks: "@frameworks"

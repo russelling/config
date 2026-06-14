@@ -1,0 +1,69 @@
+# Buffalo VFX - tk-unreal engine settings
+# Contexts: project, asset_step, episode_shot_step
+
+includes:
+- ../frameworks.yml
+- ../../app_locations.yml
+- ../tk-unreal-location.yml
+- ./tk-multi-loader2.yml
+- ./tk-multi-publish2.yml
+- ../../settings/tk-multi-screeningroom.yml
+- ./tk-multi-shotgunpanel.yml
+
+################################################################################
+
+# -- Project context ----------------------------------------------------------
+settings.tk-unreal.project:
+  apps:
+    tk-multi-about:
+      location: "@apps.tk-multi-about.location"
+    tk-multi-loader2: "@settings.tk-multi-loader2.unreal"
+    tk-multi-publish2: "@settings.tk-multi-publish2.unreal.project"
+    tk-multi-pythonconsole:
+      location: "@apps.tk-multi-pythonconsole.location"
+    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+  location: "@tk-unreal.location"
+  menu_favourites: []
+  run_at_startup:
+  - {app_instance: tk-multi-shotgunpanel, name: ''}
+  launch_builtin_plugins: [basic]
+  automatic_context_switch: true
+
+# -- Asset step context -------------------------------------------------------
+settings.tk-unreal.asset_step:
+  apps:
+    tk-multi-about:
+      location: "@apps.tk-multi-about.location"
+    tk-multi-loader2: "@settings.tk-multi-loader2.unreal"
+    tk-multi-publish2: "@settings.tk-multi-publish2.unreal.asset_step"
+    tk-multi-pythonconsole:
+      location: "@apps.tk-multi-pythonconsole.location"
+    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+  location: "@tk-unreal.location"
+  menu_favourites:
+  - {app_instance: tk-multi-publish2, name: Publish...}
+  run_at_startup:
+  - {app_instance: tk-multi-shotgunpanel, name: ''}
+  launch_builtin_plugins: [basic]
+  automatic_context_switch: true
+
+# -- Shot step context (episode_shot_step) ------------------------------------
+settings.tk-unreal.shot_step:
+  apps:
+    tk-multi-about:
+      location: "@apps.tk-multi-about.location"
+    tk-multi-loader2: "@settings.tk-multi-loader2.unreal"
+    tk-multi-publish2: "@settings.tk-multi-publish2.unreal.shot_step"
+    tk-multi-pythonconsole:
+      location: "@apps.tk-multi-pythonconsole.location"
+    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+  location: "@tk-unreal.location"
+  menu_favourites:
+  - {app_instance: tk-multi-publish2, name: Publish...}
+  run_at_startup:
+  - {app_instance: tk-multi-shotgunpanel, name: ''}
+  launch_builtin_plugins: [basic]
+  automatic_context_switch: true

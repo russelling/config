@@ -59,5 +59,6 @@ settings.tk-desktop.project:
   - matches:
     - "*Alias*"
     - "*VRED*"
+    - "*Unreal*"
     name: Automotive Tools
   location: "@engines.tk-desktop.location"

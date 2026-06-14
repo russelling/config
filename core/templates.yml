@@ -9,6 +9,7 @@
 # not expressly granted therein are reserved by Shotgun Software Inc.
 
 keys:
+    includes:
     Sequence:
         type: str
     Episode:
@@ -433,3 +434,35 @@ strings:
     nuke_quick_asset_version_name: "{Asset}_{name}_quick_{iteration}"
     hiero_version: "{version}"
     mari_asset_project_name: "{mari.project_name} - Asset {asset_name}, {task_name}"
+
+
+    include: ../env/includes/unreal/templates.yml
+
+
+##############################################################################
+# ADDITIONS FOR QT REVIEW PIPELINE
+# Add these to core/templates.yml
+##############################################################################
+
+
+# -- New path templates (add to the `paths:` section) ----------------------
+
+# Dated editorial drop folder - all QTs for a given day land here regardless
+# of source shot, for editorial to pull into the cut.
+editorial_to_editorial_area:
+    definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}'
+
+editorial_to_editorial_movie:
+    definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}_{nuke.output}_v{version}.mov'
+
+# Global logo / slate assets, shared across the show
+show_logo:
+    definition: 'shots/GLOBALS/logo/teardrop.png'
+
+# Render-complete flag files, written alongside the EXR sequence
+ep_nuke_shot_render_flag:
+    definition: '@shot_base/render/work/{Shot}_{Step}_{nuke.output}_v{version}/.render_complete_{Shot}_{Step}_{nuke.output}_v{version}.json'
+
+    # Render-complete flag file written by Nuke after render finishes
+    ep_nuke_shot_render_flag:
+        definition: '@shot_base/render/work/{Shot}_{Step}_{nuke.output}_v{version}/.render_complete_{Shot}_{Step}_{nuke.output}_v{version}.json'

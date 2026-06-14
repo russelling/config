@@ -1,0 +1,13 @@
+# Buffalo VFX - tk-multi-shotgunpanel settings for Unreal
+
+includes:
+- ../../app_locations.yml
+
+settings.tk-multi-shotgunpanel.unreal:
+  actions_hook: '{self}/general_actions.py:{engine}/tk-multi-shotgunpanel/tk-unreal_actions.py'
+  action_mappings:
+    PublishedFile:
+    - actions: [publish_clipboard]
+      filters: {}
+  enable_context_switch: true
+  location: "@apps.tk-multi-shotgunpanel.location"
