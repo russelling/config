@@ -22,7 +22,7 @@ settings.tk-unreal.project:
     tk-multi-pythonconsole:
       location: "@apps.tk-multi-pythonconsole.location"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
-    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
   location: "@tk-unreal.location"
   menu_favourites: []
   run_at_startup:
@@ -40,7 +40,7 @@ settings.tk-unreal.asset_step:
     tk-multi-pythonconsole:
       location: "@apps.tk-multi-pythonconsole.location"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
-    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
   location: "@tk-unreal.location"
   menu_favourites:
   - {app_instance: tk-multi-publish2, name: Publish...}
@@ -59,7 +59,7 @@ settings.tk-unreal.shot_step:
     tk-multi-pythonconsole:
       location: "@apps.tk-multi-pythonconsole.location"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel.unreal"
-    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv_review"
+    tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
   location: "@tk-unreal.location"
   menu_favourites:
   - {app_instance: tk-multi-publish2, name: Publish...}

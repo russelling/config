@@ -9,7 +9,6 @@
 # not expressly granted therein are reserved by Shotgun Software Inc.
 
 keys:
-    includes:
     Sequence:
         type: str
     Episode:
@@ -436,7 +435,6 @@ strings:
     mari_asset_project_name: "{mari.project_name} - Asset {asset_name}, {task_name}"
 
 
-    include: ../env/includes/unreal/templates.yml
 
 
 ##############################################################################
