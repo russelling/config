@@ -426,11 +426,13 @@ class UnrealTurntablePublish(HookBaseClass):
             output_setting.override_existing_output = True
             output_setting.zero_pad_frame_numbers = 4
 
-            # EXR output
+            # EXR output — DWAB lossy compression for compact review renders.
+            # Visually transparent for turntable QT purposes; 5-10x smaller than PIZ.
+            # Switch to PIZ or ZIP if lossless is ever required.
             exr_setting = config.find_or_add_setting_by_class(
                 unreal.MoviePipelineImageSequenceOutput_EXR
             )
-            exr_setting.compression = unreal.EXRCompressionFormat.PIZ
+            exr_setting.compression = unreal.EXRCompressionFormat.DWAB
 
             # High quality anti-aliasing
             aa_setting = config.find_or_add_setting_by_class(
@@ -564,3 +566,4 @@ class UnrealTurntablePublish(HookBaseClass):
             "Turntable submitted for review. "
             "qt_watcher will pick up the flag and bake the QT."
         )
+
