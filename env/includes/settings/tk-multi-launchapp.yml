@@ -68,4 +68,5 @@ settings.tk-multi-launchapp.unreal:
   mac_path: "@path.mac.unreal"
   windows_path: "@path.windows.unreal"
   menu_name: Unreal Engine
+  command_name: unreal_engine
   location: "@apps.tk-multi-launchapp.location"
