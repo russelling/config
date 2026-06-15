@@ -207,9 +207,27 @@ Write nodes (full EXR renders to `render/`) must be executed **manually** by the
 
 ---
 
+## Critical: manual patches to installed apps
+
+### tk-unreal engine.py — UE 5.7 Qt compatibility patch
+
+`install/github/ue4plugins/tk-unreal/v1.3.1/engine.py` has been manually patched to fix an `AttributeError: 'NoneType' object has no attribute 'QApplication'` crash on UE 5.7. The patched source of record is committed to `hooks/tk-unreal/engine.py` in the config repo, but Toolkit does **not** automatically apply it — it loads from the `install/` folder at runtime.
+
+**If `tank cache_apps` is run and re-downloads tk-unreal, this patch will be overwritten and must be reapplied.**
+
+To reapply:
+```bash
+cp "/path/to/config/hooks/tk-unreal/engine.py" \
+   "/path/to/config/install/github/ue4plugins/tk-unreal/v1.3.1/engine.py"
+```
+
+The patch wraps `init_qt_app()` in a try/except and guards against `QtGui` being `None` when UE 5.7 manages Qt internally.
+
+---
+
 ## Outstanding items (WIP)
 
-- [ ] `tank cache_apps` has not been run yet — must be run after first install against a live project
+- [x] `tank cache_apps` — completed on Windows workstation
 - [ ] Unreal publish workflow — `tk-unreal` publish plugins are stubbed; full `.umap` export pipeline not yet defined
 - [ ] Premiere Pro launcher — launch-only; no `tk-premiere` engine exists
 - [ ] Maya and Blender review submission hooks not yet configured
@@ -231,3 +249,4 @@ Write nodes (full EXR renders to `render/`) must be executed **manually** by the
 8. Update the WIP list when items are resolved or new gaps found.
 9. No credentials or real paths in commits — use `config/paths.local.yml` (gitignored).
 10. Prefer includes over duplication — shared blocks go in `env/includes/settings/`.
+
