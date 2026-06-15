@@ -223,6 +223,37 @@ cp "/path/to/config/hooks/tk-unreal/engine.py" \
 
 The patch wraps `init_qt_app()` in a try/except and guards against `QtGui` being `None` when UE 5.7 manages Qt internally.
 
+### tk-framework-unrealqt framework.py — UE 5.7 Qt compatibility patch
+
+`install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/framework.py` has been manually patched to fix `NoneType` errors in `tk-framework-shotgunutils` and `tk-multi-shotgunpanel` on UE 5.7. The patched source of record is committed to `hooks/tk-framework-unrealqt/framework.py`.
+
+The patch changes the "Qt already available" early-return check to verify that `QtGui` is **fully** available (not just partially). In UE 5.5+, Unreal exposes its internal Qt but `QtGui` comes back as `None`, causing all apps that depend on `shotgunutils` to fail. The patch forces the bundled PySide6 vendor to activate instead.
+
+**If `tank cache_apps` re-downloads `tk-framework-unrealqt`, this patch will be overwritten and must be reapplied.**
+
+To reapply:
+```bash
+cp "/path/to/config/hooks/tk-framework-unrealqt/framework.py" \
+   "/path/to/config/install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/framework.py"
+```
+
+### tk-framework-unrealqt vendor zip — must be manually installed
+
+`tank cache_apps` does **not** download the platform-specific PySide6 vendor zips — only the base framework code. The vendor zip must be downloaded and unpacked manually into the install folder.
+
+**If the install folder is wiped and re-cached, run this on the Mac:**
+```bash
+cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/"
+curl -L -o unrealqt-py311-win.zip \
+  "https://github.com/ue4plugins/tk-framework-unrealqt/releases/download/v1.3.1/v1.3.1-py3.11-win.zip"
+unzip unrealqt-py311-win.zip
+# When prompted to replace existing files, press N
+```
+
+Required vendor path after install: `python/vendors/py3.11/windows/`
+
+UE 5.7 uses Python 3.11.8. The py3.11 Windows vendor is the correct one.
+
 ---
 
 ## Outstanding items (WIP)
@@ -249,4 +280,5 @@ The patch wraps `init_qt_app()` in a try/except and guards against `QtGui` being
 8. Update the WIP list when items are resolved or new gaps found.
 9. No credentials or real paths in commits — use `config/paths.local.yml` (gitignored).
 10. Prefer includes over duplication — shared blocks go in `env/includes/settings/`.
+
 
