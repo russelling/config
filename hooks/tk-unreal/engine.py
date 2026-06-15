@@ -107,23 +107,33 @@ class UnrealEditorEngine(Engine):
     def init_qt_app(self):
         self.logger.debug("%s: Initializing QtApp for Unreal", self)
 
-        from sgtk.platform.qt import QtGui
+        try:
+            from sgtk.platform.qt import QtGui
 
-        if not QtGui.QApplication.instance():
-            self._qt_app = QtGui.QApplication(sys.argv)
-            self._qt_app.setQuitOnLastWindowClosed(False)
-        else:
-            self._qt_app = QtGui.QApplication.instance()
+            if QtGui is None:
+                raise RuntimeError("QtGui is None - Unreal is managing Qt internally")
 
-        # On other platforms than Windows, we need to process the Qt events otherwise
-        # UIs are "frozen". We use a slate tick callback to do that on a regular basis.
-        # It is not clear why this is not needed on Windows, possibly because a
-        # dedicated Windows event dispatcher is used instead of a regular
-        # QAbstractEventDispatcher
-        if sys.platform != "win32":
-            unreal.register_slate_post_tick_callback(self._process_qt_events_cb)
-        # Make the QApplication use the dark theme. Must be called after the QApplication is instantiated
-        self._initialize_dark_look_and_feel()
+            if not QtGui.QApplication.instance():
+                self._qt_app = QtGui.QApplication(sys.argv)
+                self._qt_app.setQuitOnLastWindowClosed(False)
+            else:
+                self._qt_app = QtGui.QApplication.instance()
+
+            # On other platforms than Windows, we need to process the Qt events otherwise
+            # UIs are "frozen". We use a slate tick callback to do that on a regular basis.
+            # It is not clear why this is not needed on Windows, possibly because a
+            # dedicated Windows event dispatcher is used instead of a regular
+            # QAbstractEventDispatcher
+            if sys.platform != "win32":
+                unreal.register_slate_post_tick_callback(self._process_qt_events_cb)
+            # Make the QApplication use the dark theme. Must be called after the QApplication is instantiated
+            self._initialize_dark_look_and_feel()
+
+        except Exception as e:
+            self.logger.debug(
+                "%s: Could not initialize Qt app, Unreal may be managing Qt internally: %s",
+                self, e
+            )
 
     @staticmethod
     def _process_qt_events_cb(delta_time):
