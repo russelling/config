@@ -27,7 +27,7 @@ settings.tk-unreal.project:
   menu_favourites: []
   run_at_startup:
   - {app_instance: tk-multi-shotgunpanel, name: ''}
-  launch_builtin_plugins: [basic]
+  launch_builtin_plugins: []
   automatic_context_switch: true
 
 # -- Asset step context -------------------------------------------------------
@@ -46,7 +46,7 @@ settings.tk-unreal.asset_step:
   - {app_instance: tk-multi-publish2, name: Publish...}
   run_at_startup:
   - {app_instance: tk-multi-shotgunpanel, name: ''}
-  launch_builtin_plugins: [basic]
+  launch_builtin_plugins: []
   automatic_context_switch: true
 
 # -- Shot step context (episode_shot_step) ------------------------------------
@@ -65,5 +65,6 @@ settings.tk-unreal.shot_step:
   - {app_instance: tk-multi-publish2, name: Publish...}
   run_at_startup:
   - {app_instance: tk-multi-shotgunpanel, name: ''}
-  launch_builtin_plugins: [basic]
+  launch_builtin_plugins: []
   automatic_context_switch: true
+
