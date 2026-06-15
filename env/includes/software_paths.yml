@@ -16,24 +16,27 @@
 
 # Mari
 path.linux.mari: "/usr/local/Mari7.5v2/mari"
-path.windows.mari: C:\\Program Files\\Mari7.5v2\\Bundle\\bin\\Mari7.5v2.exe
+path.windows.mari: C:\Program Files\Mari7.5v2\Bundle\bin\Mari7.5v2.exe
 
 # Motionbuilder
-path.windows.motionbuilder: C:\\Program Files\\Autodesk\\MotionBuilder 2027\\bin\\x64\\motionbuilder.exe
+path.windows.motionbuilder: C:\Program Files\Autodesk\MotionBuilder 2027\bin\x64\motionbuilder.exe
 
 # Hiero
 path.linux.hiero: "/usr/local/Nuke17.0v1/Nuke17.0"
 path.mac.hiero: "/Applications/Nuke17.0v1/Hiero17.0v1.app"
-path.windows.hiero: C:\\Program Files\\Nuke17.0v1\\Nuke17.0.exe
+path.windows.hiero: C:\Program Files\Nuke17.0v1\Nuke17.0.exe
 
 # RV
 path.linux.rv: "rv"
 path.mac.rv: "/Applications/RV.app"
-path.windows.rv: C:\\Program Files\\Shotgun\\RV-7.9.0\\bin\\rv.exe
+path.windows.rv: C:\Program Files\Shotgun\RV-7.9.0\bin\rv.exe
 
 # Unreal Engine
 # NOTE: Unreal Engine does not support macOS - Windows only.
 # mac_path left as placeholder to satisfy YAML parser; it will never be invoked.
+# UNREAL_PATH environment variable must be set on every Windows machine:
+#   Standard install: UNREAL_PATH=C:\Program Files\Epic Games\UE_5.7
+#   D-drive install:  UNREAL_PATH=D:\Program Files\Epic Games\UE_5.7
 path.linux.unreal: "/opt/UnrealEngine/Engine/Binaries/Linux/UnrealEditor"
 path.mac.unreal: "/dev/null"
-path.windows.unreal: C:\\Program Files\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UnrealEditor.exe
+path.windows.unreal: "%UNREAL_PATH%\Engine\Binaries\Win64\UnrealEditor.exe"
