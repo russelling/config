@@ -147,9 +147,9 @@ def run_render_complete(write_node):
 
     fields = ctx.as_template_fields(work_template)
 
-    # nuke.output - use the write node's name, lowercased, as the output identifier
+    # output - use the write node's name, lowercased, as the output identifier
     output_name = write_node.name().lower()
-    fields["nuke.output"] = output_name
+    fields["output"] = output_name
 
     # version - pull from current script's version via context fields if present,
     # otherwise try to parse from the write path
@@ -177,7 +177,7 @@ def run_render_complete(write_node):
         "scene": fields.get("Scene"),
         "step": fields.get("Step"),
         "version": fields.get("version"),
-        "nuke_output": output_name,
+        "output": output_name,
         "artist": getpass.getuser(),
         "date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "frame_first": first_frame,
