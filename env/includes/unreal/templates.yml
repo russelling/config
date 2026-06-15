@@ -51,6 +51,18 @@ paths:
     unreal.asset_publish:
         definition: 'assets/unreal/exports/{YYYY}_{MM}_{DD}/{name}.fbx'
 
+    # Turntable EXR render output (Unreal -> qt_watcher -> Nuke bake)
+    unreal_asset_turntable_render:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/{Asset}_turntable_v{version}.{SEQ}.exr'
+
+    # Render-complete flag JSON picked up by qt_watcher
+    unreal_asset_turntable_flag:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/.render_complete_{Asset}_turntable_v{version}.json'
+
+    # Final baked QT (written by qt_bake_slate_burnin.py)
+    unreal_asset_turntable_movie:
+        definition: '@asset_root/review/{Asset}_turntable_v{version}.mov'
+
 strings:
     # Content browser import paths for Loader
     unreal_loader_asset_path: "/Game/Assets/{ue_sg_asset_type}/{ue_sg_asset_name}/"
