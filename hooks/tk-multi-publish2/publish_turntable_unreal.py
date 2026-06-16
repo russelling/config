@@ -159,7 +159,7 @@ class UnrealTurntablePublish(HookBaseClass):
 
         render_dir = os.path.dirname(
             render_template.apply_fields(
-                dict(template_fields, SEQ="0001")
+                dict(template_fields, SEQ=1)
             )
         )
         render_path = render_template.apply_fields(template_fields)
@@ -566,4 +566,5 @@ class UnrealTurntablePublish(HookBaseClass):
             "Turntable submitted for review. "
             "qt_watcher will pick up the flag and bake the QT."
         )
+
 
