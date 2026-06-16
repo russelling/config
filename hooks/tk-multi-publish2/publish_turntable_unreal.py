@@ -154,7 +154,7 @@ class UnrealTurntablePublish(HookBaseClass):
             "Asset": asset_name,
             "sg_asset_type": asset_type,
             "version": version_number,
-            "SEQ": "####",
+            "SEQ": 1,
         }
 
         render_dir = os.path.dirname(
