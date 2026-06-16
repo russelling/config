@@ -417,6 +417,36 @@ paths:
     unreal_asset_work:
         definition: '@asset_root/work/unreal/{Asset}_{name}_v{version}'
 
+    # Turntable EXR render output (Unreal -> qt_watcher -> Nuke bake)
+    unreal_asset_turntable_render:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/{Asset}_turntable_v{version}.{SEQ}.exr'
+
+    # Render-complete flag JSON picked up by qt_watcher
+    unreal_asset_turntable_flag:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/.render_complete_{Asset}_turntable_v{version}.json'
+
+    # Final baked QT (written by qt_bake_slate_burnin.py)
+    unreal_asset_turntable_movie:
+        definition: '@asset_root/review/{Asset}_turntable_v{version}.mov'
+
+    # FBX exports for Unreal loading (from Maya asset publishes)
+    unreal_maya_asset_fbx_publish:
+        definition: '@asset_root/publish/fbx/{name}.v{version}.fbx'
+
+    # Turntable review renders from Unreal (Maya asset pipeline)
+    unreal_maya_turntable_render:
+        definition: '@asset_root/work/images/{name}_turntable_v{version}.mov'
+    unreal_maya_turntable_publish:
+        definition: '@asset_root/review/{Asset}_{name}_turntable_v{version}.mov'
+
+    # Movie publish from Unreal (level sequence render)
+    unreal_movie_publish:
+        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{name}.v{version}.mov'
+
+    # Generic asset export from Unreal
+    unreal_asset_publish:
+        definition: 'assets/unreal/exports/{YYYY}_{MM}_{DD}/{name}.fbx'
+
     # ── Review ────────────────────────────────────────────────────────────────
     asset_quicktime_quick:
         definition: '@asset_root/review/{Asset}_{name}_{iteration}.mov'
@@ -447,6 +477,7 @@ strings:
     nuke_quick_asset_version_name: "{Asset}_{name}_quick_{iteration}"
     hiero_version: "{version}"
     mari_asset_project_name: "{mari.project_name} - Asset {asset_name}, {task_name}"
+
 
 
 
