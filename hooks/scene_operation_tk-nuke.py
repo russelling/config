@@ -305,7 +305,7 @@ class SceneOperation(HookClass):
             for sel in nuke.selectedNodes():
                 sel.setSelected(False)
             dot_write.setSelected(True)
-            write = wn_app.create_new_node("Primary EXR (32-bit)")
+            write = wn_app.create_new_write_node("Primary EXR (32-bit)")
             write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[render template-driven]")
             write.setXYpos(x_main, y)
         except Exception as _wn_exc:
@@ -342,6 +342,7 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
 
