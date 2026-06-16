@@ -35,6 +35,18 @@ import glob
 import nuke
 import sgtk
 
+# ---------------------------------------------------------------------------
+# Render-complete dialog wiring
+#
+# render_complete_callback.py's register() call (nuke.addAfterRender) only
+# fires for plain Write nodes. Our pipeline uses TK Write nodes
+# (tk-nuke-writenode "WriteTank" gizmos), whose internal Write1 node has its
+# own afterRender knob wired to tk_nuke_writenode's gizmo callback chain,
+# which only runs whatever Python is in the gizmo's own tk_after_render
+# knob - it does NOT trigger nuke.addAfterRender() callbacks registered at
+# the module level. So instead we hook onUserCreate for WriteTank nodes and
+# populate tk_after_render directly with a call into this module.
+# ---------------------------------------------------------------------------
 try:
     import os as _os, sys as _sys
     _hooks_dir = _os.path.dirname(_os.path.abspath(__file__))
@@ -42,6 +54,30 @@ try:
         _sys.path.insert(0, _hooks_dir)
     import render_complete_callback
     render_complete_callback.register()
+
+    _AFTER_RENDER_CMD = (
+        "import sys; "
+        "sys.path.insert(0, r'%s') if r'%s' not in sys.path else None; "
+        "import render_complete_callback as _rcc; "
+        "_rcc.run_render_complete(nuke.thisGroup())"
+    ) % (_hooks_dir, _hooks_dir)
+
+    def _wire_tk_after_render(*args, **kwargs):
+        node = nuke.thisNode()
+        if not node:
+            return
+        knob = node.knob("tk_after_render")
+        if knob is not None:
+            knob.setValue(_AFTER_RENDER_CMD)
+
+    nuke.addOnUserCreate(_wire_tk_after_render, nodeClass="WriteTank")
+    nuke.addOnScriptLoad(
+        lambda: [
+            n.knob("tk_after_render").setValue(_AFTER_RENDER_CMD)
+            for n in nuke.allNodes("WriteTank")
+            if n.knob("tk_after_render") is not None
+        ]
+    )
 except Exception as _exc:
     nuke.warning("[render_complete] Could not register callback: %s" % _exc)
 
@@ -279,3 +315,4 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
