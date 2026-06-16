@@ -293,16 +293,34 @@ class SceneOperation(HookClass):
         dot_write["label"].setValue("to Write")
         dot_write.setXYpos(x_main + 34, y)
 
-        # ── Write: EXR in ACEScg (no color bake) ─────────────────────────
+        # ── Write: TK Write Node (Primary EXR 32-bit) ────────────────────
+        # We use tk-nuke-writenode's WriteTank gizmo so the file path is
+        # driven by the ep_nuke_shot_render_work template and the
+        # tk_after_render gizmo callback chain (which we wire to
+        # render_complete_callback) fires after every render.
         y += y_step
-        write = nuke.createNode("Write", inpanel=False)
-        write.setInput(0, dot_write)
-        write["file"].setValue(self._p(render_path))
-        write["file_type"].setValue("exr")
-        write["raw"].setValue(True)
-        write["colorspace"].setValue("raw")
-        write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[value file]")
-        write.setXYpos(x_main, y)
+        try:
+            wn_app = engine.apps["tk-nuke-writenode"]
+            # Select dot_write first so the new node connects to it
+            for sel in nuke.selectedNodes():
+                sel.setSelected(False)
+            dot_write.setSelected(True)
+            write = wn_app.create_new_node("Primary EXR (32-bit)")
+            write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[render template-driven]")
+            write.setXYpos(x_main, y)
+        except Exception as _wn_exc:
+            # Fallback: if tk-nuke-writenode isn't loaded for some reason,
+            # fall back to a plain Write node so the script still works.
+            # Note: render-complete callback will NOT fire on this path.
+            nuke.warning("[scene_op] tk-nuke-writenode not available, falling back to plain Write: %s" % _wn_exc)
+            write = nuke.createNode("Write", inpanel=False)
+            write.setInput(0, dot_write)
+            write["file"].setValue(self._p(render_path))
+            write["file_type"].setValue("exr")
+            write["raw"].setValue(True)
+            write["colorspace"].setValue("raw")
+            write["label"].setValue("EXR OUTPUT (FALLBACK)\n(ACEScg linear — no bake)")
+            write.setXYpos(x_main, y)
 
         # ── Viewer ────────────────────────────────────────────────────────
         y += y_step
@@ -324,5 +342,6 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
