@@ -305,7 +305,14 @@ class SceneOperation(HookClass):
             for sel in nuke.selectedNodes():
                 sel.setSelected(False)
             dot_write.setSelected(True)
-            write = wn_app.create_new_write_node("Primary EXR (32-bit)")
+            # create_new_write_node creates the node but doesn't return it.
+            # Snapshot the WriteTank nodes before/after to grab the new one.
+            _existing = set(nuke.allNodes("WriteTank"))
+            wn_app.create_new_write_node("Primary EXR (32-bit)")
+            _new_nodes = [n for n in nuke.allNodes("WriteTank") if n not in _existing]
+            if not _new_nodes:
+                raise RuntimeError("create_new_write_node returned no new WriteTank node")
+            write = _new_nodes[0]
             write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[render template-driven]")
             write.setXYpos(x_main, y)
         except Exception as _wn_exc:
@@ -342,6 +349,7 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
 
