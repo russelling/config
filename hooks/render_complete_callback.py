@@ -161,7 +161,12 @@ def run_render_complete(write_node):
     # from the actual version/output values used elsewhere in this flag.
     render_work_fields = dict(fields)
     render_work_fields["SEQ"] = "%04d"
-    resolved_exr_pattern = render_work_template.apply_fields(render_work_fields)
+    # The watcher daemon that consumes this flag always runs on the Mac
+    # Studio, regardless of which OS this hook fires from. Always resolve
+    # the Mac-style path here so the flag is portable across platforms.
+    resolved_exr_pattern = render_work_template.apply_fields(
+        render_work_fields, platform="mac"
+    )
 
     # --- Prompt artist ---
     submitted_for_options = _get_submitted_for_options(sg)
@@ -230,4 +235,5 @@ def _after_render():
 
 def register():
     nuke.addAfterRender(_after_render)
+
 
