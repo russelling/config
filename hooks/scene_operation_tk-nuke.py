@@ -138,7 +138,7 @@ class SceneOperation(HookClass):
                 nuke.scriptSave()
             return resolved
 
-        elif operation == "prepare_new_scene":
+        elif operation == "prepare_new":
             # tk-multi-workfiles2 v0.16+ "New File" action calls this op
             # (after issuing a separate 'reset' first). At this point the
             # script is empty and the context is the new shot/task. Build
@@ -359,6 +359,7 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
 
