@@ -144,6 +144,7 @@ def run_render_complete(write_node):
 
     work_template = tk.templates["ep_nuke_shot_work"]
     flag_template = tk.templates["ep_nuke_shot_render_flag"]
+    render_work_template = tk.templates["ep_nuke_shot_render_work"]
 
     fields = ctx.as_template_fields(work_template)
 
@@ -154,6 +155,13 @@ def run_render_complete(write_node):
     # version - pull from current script's version via context fields if present,
     # otherwise try to parse from the write path
     fields.setdefault("version", fields.get("version", 1))
+
+    # Build the EXR pattern from the template/fields rather than trusting the
+    # raw Write node file knob, which can be stale or hand-edited and drift
+    # from the actual version/output values used elsewhere in this flag.
+    render_work_fields = dict(fields)
+    render_work_fields["SEQ"] = "%04d"
+    resolved_exr_pattern = render_work_template.apply_fields(render_work_fields)
 
     # --- Prompt artist ---
     submitted_for_options = _get_submitted_for_options(sg)
@@ -184,7 +192,7 @@ def run_render_complete(write_node):
         "frame_last": last_frame,
         "cut_in": cut_in,
         "cut_out": cut_out,
-        "exr_path_pattern": out_path,
+        "exr_path_pattern": resolved_exr_pattern,
         "submitted_for": values["submitted_for"],
         "description": values["description"],
         "task_id": ctx.task["id"] if ctx.task else None,
@@ -222,3 +230,4 @@ def _after_render():
 
 def register():
     nuke.addAfterRender(_after_render)
+
