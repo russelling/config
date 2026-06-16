@@ -56,11 +56,20 @@ try:
     render_complete_callback.register()
 
     _AFTER_RENDER_CMD = (
-        "import sys; "
-        "sys.path.insert(0, r'%s') if r'%s' not in sys.path else None; "
-        "import render_complete_callback as _rcc; "
-        "_rcc.run_render_complete(nuke.thisGroup())"
-    ) % (_hooks_dir, _hooks_dir)
+        "import os, sys, sgtk\n"
+        "try:\n"
+        "    _eng = sgtk.platform.current_engine()\n"
+        "    _cfg_root = _eng.sgtk.pipeline_configuration.get_config_location()\n"
+        "    _hooks = os.path.join(_cfg_root, 'hooks')\n"
+        "    if _hooks not in sys.path:\n"
+        "        sys.path.insert(0, _hooks)\n"
+        "    if 'render_complete_callback' in sys.modules:\n"
+        "        del sys.modules['render_complete_callback']\n"
+        "    import render_complete_callback as _rcc\n"
+        "    _rcc.run_render_complete(nuke.thisGroup())\n"
+        "except Exception as _e:\n"
+        "    nuke.warning('[render_complete] failed: %s' % _e)\n"
+    )
 
     def _wire_tk_after_render(*args, **kwargs):
         node = nuke.thisNode()
@@ -315,4 +324,5 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
