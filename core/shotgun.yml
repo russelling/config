@@ -3,5 +3,7 @@
 # Created 2026-05-07 11:29:44
 # 
 host: https://buffalovfx.shotgrid.autodesk.com
+api_script: MR_python_render
+api_key: u*hweomwozfwnjuLtjz9rjsqf
 
 # End of file.
