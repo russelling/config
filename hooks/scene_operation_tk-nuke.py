@@ -141,11 +141,20 @@ class SceneOperation(HookClass):
         elif operation == "prepare_new":
             # tk-multi-workfiles2 v0.16+ "New File" action calls this op
             # (after issuing a separate 'reset' first). At this point the
-            # script is empty and the context is the new shot/task. Build
-            # the color graph (including the TK Write node) so the artist
-            # gets a populated scene rather than a blank canvas.
+            # script is empty and the context is the new shot/task.
+            #
+            # IMPORTANT: tk-nuke-writenode.create_new_write_node() needs a
+            # saved script to resolve its render template fields. So save
+            # the script to its versioned path BEFORE building the graph,
+            # mirroring what the legacy 'new' branch does.
             if self._is_first_version(context):
+                resolved = self._resolve_new_path(context)
+                self._ensure_dir(resolved)
+                nuke.scriptSaveAs(resolved, overwrite=0)
+                if hasattr(engine, "save_context_to_script"):
+                    engine.save_context_to_script()
                 self._build_color_template(context)
+                nuke.scriptSave()
             return True
 
         elif operation == "version_up":
@@ -359,6 +368,7 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
 
