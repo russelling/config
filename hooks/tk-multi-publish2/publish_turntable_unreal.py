@@ -172,10 +172,27 @@ class UnrealTurntablePublish(HookBaseClass):
 
         self.logger.info("Building turntable scene for: %s" % asset_name)
 
-        # Resolve the published asset path from item properties
-        asset_content_path = item.properties.get(
-            "sg_publish_data", {}
-        ).get("path", {}).get("local_path", "")
+        # Resolve the Unreal content browser path for the published asset.
+        # item.properties["sg_publish_data"] contains the ShotGrid publish record.
+        # We need the Unreal content path (/Game/...), not the filesystem path.
+        # The selected asset in the Unreal content browser is the authoritative source.
+        import unreal as _ue
+        asset_content_path = ""
+        try:
+            selected = _ue.EditorUtilityLibrary.get_selected_assets()
+            if selected:
+                asset_content_path = selected[0].get_path_name()
+                # Strip the object name suffix (e.g. /Game/Foo/Bar.Bar -> /Game/Foo/Bar)
+                if "." in asset_content_path:
+                    asset_content_path = asset_content_path.rsplit(".", 1)[0]
+                self.logger.info("Using selected asset content path: %s" % asset_content_path)
+            else:
+                self.logger.warning(
+                    "No asset selected in content browser — "
+                    "turntable will render an empty scene."
+                )
+        except Exception as e:
+            self.logger.warning("Could not resolve asset content path: %s" % e)
 
         # Build the turntable scene and render
         success = self._render_turntable(
@@ -566,5 +583,6 @@ class UnrealTurntablePublish(HookBaseClass):
             "Turntable submitted for review. "
             "qt_watcher will pick up the flag and bake the QT."
         )
+
 
 
