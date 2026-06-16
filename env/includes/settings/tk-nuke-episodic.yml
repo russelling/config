@@ -17,6 +17,10 @@ includes:
 - ./tk-multi-shotgunpanel.yml
 
 settings.tk-nuke.episodic.shot_step:
+  # Registers the render-complete dialog (Submitted For / Description) and
+  # flag-JSON writer. Without this, render_complete_callback.py's register()
+  # function is never called and nuke.addAfterRender() never fires.
+  post_engine_init: "{config}/post_engine_init_register_render_callback.py"
   apps:
 
     tk-multi-about:
@@ -136,3 +140,4 @@ settings.tk-nuke.episodic.shot_step:
   - {app_instance: tk-multi-breakdown2, name: Scene Breakdown...}
 
   location: "@engines.tk-nuke.location"
+
