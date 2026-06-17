@@ -338,7 +338,16 @@ class SceneOperation(HookClass):
             # Fallback: if tk-nuke-writenode isn't loaded for some reason,
             # fall back to a plain Write node so the script still works.
             # Note: render-complete callback will NOT fire on this path.
-            nuke.warning("[scene_op] tk-nuke-writenode not available, falling back to plain Write: %s" % _wn_exc)
+            import traceback as _tb
+            _trace = _tb.format_exc()
+            # Use nuke.tprint (always goes to stdout, never silenced by Nuke
+            # warning filters or Script Editor visibility timing) and write
+            # to root-level error log too for guaranteed capture.
+            nuke.tprint("[scene_op] tk-nuke-writenode fallback triggered. Exception was:\n%s" % _trace)
+            try:
+                nuke.warning("[scene_op] tk-nuke-writenode fallback. See stdout for traceback. Error: %r" % _wn_exc)
+            except Exception:
+                pass
             write = nuke.createNode("Write", inpanel=False)
             write.setInput(0, dot_write)
             write["file"].setValue(self._p(render_path))
@@ -368,6 +377,7 @@ class SceneOperation(HookClass):
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, plate_path, render_path)
         )
+
 
 
 
