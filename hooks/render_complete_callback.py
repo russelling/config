@@ -230,10 +230,51 @@ def _after_render():
 
 
 # ---------------------------------------------------------------------------
-# Registration - call this from init.py / menu.py
+# Single-line entry point for the stock Write node "afterRender" knob
+#
+# Nuke's native Write node Python tab "afterRender" field evaluates as a
+# SINGLE Python expression, not a multi-statement script (unlike a
+# PythonScript-class knob). It cannot contain import/try/except blocks -
+# doing so raises "invalid syntax (<string>, line 1)" because Nuke compiles
+# the knob text as one expression and chokes on the first line break.
+#
+# To keep "one external script, every Write node calls it, future changes
+# propagate automatically" working with that constraint, wire every Write
+# node's afterRender knob to a single expression that calls this function:
+#
+#   __import__('render_complete_callback').on_write_after_render()
+#
+# All the multi-line logic (sys.path setup, module reload, error handling)
+# lives here instead, in actual Python source - never re-pasted into knobs.
+# ---------------------------------------------------------------------------
+
+def on_write_after_render():
+    try:
+        write_node = nuke.thisNode()
+        run_render_complete(write_node)
+    except Exception as exc:
+        nuke.warning("[render_complete] on_write_after_render failed: %s" % exc)
+
+
+# ---------------------------------------------------------------------------
+# Registration
+#
+# NOTE: nuke.addAfterRender() is intentionally NOT used here. It only fires
+# within a live Nuke session where this module was imported via Toolkit's
+# engine bootstrap (scene_operation_tk-nuke.py). On a Deadline render farm,
+# jobs are frequently launched via command-line/slave processes that may
+# not go through that bootstrap at all, so the callback would silently
+# never fire. The knob-based afterRender wiring on each Write node is saved
+# directly in the .nk script and fires regardless of how the render is
+# launched (interactive, command-line, or Deadline slave) - see
+# on_write_after_render() above and _wire_after_render() in
+# scene_operation_tk-nuke.py.
+#
+# register() is kept as a no-op placeholder in case a future use case needs
+# session-only behavior (e.g. a non-render-farm dev/test mode).
 # ---------------------------------------------------------------------------
 
 def register():
-    nuke.addAfterRender(_after_render)
+    pass
 
 
