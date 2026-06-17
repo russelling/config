@@ -38,38 +38,75 @@ import sgtk
 # ---------------------------------------------------------------------------
 # Render-complete dialog wiring
 #
-# render_complete_callback.py's register() call (nuke.addAfterRender) only
-# fires for plain Write nodes. Our pipeline uses TK Write nodes
-# (tk-nuke-writenode "WriteTank" gizmos), whose internal Write1 node has its
-# own afterRender knob wired to tk_nuke_writenode's gizmo callback chain,
-# which only runs whatever Python is in the gizmo's own tk_after_render
-# knob - it does NOT trigger nuke.addAfterRender() callbacks registered at
-# the module level. So instead we hook onUserCreate for WriteTank nodes and
-# populate tk_after_render directly with a call into this module.
+# CONFIRMED 2026-06-17: WriteTank nodes do NOT have a "tk_after_render" knob.
+# (Checked directly: node.knobs().keys() on a real WriteTank node returns
+# only ['render_mode'] among render/after/tk_-related names.) The previous
+# version of this block assumed that knob existed and populated it with a
+# multi-line script - which silently did nothing, since the `if knob is not
+# None` guard always failed.
+#
+# The knob that DOES exist and DOES fire is the stock Nuke Write node
+# "Python" tab -> "afterRender" field. Nuke evaluates that field as a
+# SINGLE Python expression, not a multi-statement script - multi-line text
+# (import/try/except blocks) raises "invalid syntax (<string>, line 1)"
+# because Nuke compiles the whole knob value as one expression and chokes
+# on the first newline.
+#
+# So we wire afterRender to a single expression that calls one stable
+# entry point in render_complete_callback.py. All multi-line logic (sys.path
+# setup, module reload, error handling) lives in that function instead -
+# never re-pasted into a knob. Future changes to render-complete behavior
+# only require editing render_complete_callback.py; every Write node, old
+# or new, picks up the change automatically because they all just call the
+# same function by name.
+#
+# We do NOT use nuke.addAfterRender() here. That registers a callback at
+# the Python-session level, which only exists if this hook module was
+# imported via Toolkit's engine bootstrap in a live Nuke session. On a
+# Deadline render farm, jobs are frequently launched via command-line or
+# slave processes that may not run that bootstrap at all, so the callback
+# would silently never fire. The knob-based wiring below is saved directly
+# in the .nk script and fires regardless of how the render is launched.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Render-complete dialog wiring
+#
+# CONFIRMED 2026-06-17 against tk-nuke-writenode v1.7.2 source
+# (handler.py, on_after_render_gizmo_callback, line ~843):
+#
+#     grp = nuke.thisGroup()
+#     cmd = grp.knob("tk_after_render").value()
+#     if cmd:
+#         exec(cmd)
+#
+# So tk_after_render IS the correct knob, and it lives on the WriteTank
+# group node (grp = nuke.thisGroup()), not on the internal Write1 node.
+# tk-nuke-writenode creates this knob itself as part of the gizmo; this
+# hook only needs to set its value once the node exists.
+#
+# The earlier bug was the VALUE we put in that knob: a multi-line script
+# string. tk-nuke-writenode runs the knob value through Python's exec(),
+# and a multi-line string with embedded '\n' literals can still fail to
+# round-trip cleanly through Nuke's knob value storage/exec() depending on
+# quoting - confirmed by an actual SyntaxError pointing at the literal
+# 'render_complete_callback' string when the multi-line version was used.
+# A single-statement expression avoids the whole class of problem:
+#
+#     __import__('render_complete_callback').on_write_after_render()
+#
+# All real logic (sys.path setup, module reload, try/except) lives inside
+# on_write_after_render() in render_complete_callback.py - never re-pasted
+# into a knob string. Future changes only require editing that one
+# function; every WriteTank node, old or new, picks up the change because
+# they all just call it by name.
 # ---------------------------------------------------------------------------
 try:
     import os as _os, sys as _sys
     _hooks_dir = _os.path.dirname(_os.path.abspath(__file__))
     if _hooks_dir not in _sys.path:
         _sys.path.insert(0, _hooks_dir)
-    import render_complete_callback
-    render_complete_callback.register()
 
-    _AFTER_RENDER_CMD = (
-        "import os, sys, sgtk\n"
-        "try:\n"
-        "    _eng = sgtk.platform.current_engine()\n"
-        "    _cfg_root = _eng.sgtk.pipeline_configuration.get_config_location()\n"
-        "    _hooks = os.path.join(_cfg_root, 'hooks')\n"
-        "    if _hooks not in sys.path:\n"
-        "        sys.path.insert(0, _hooks)\n"
-        "    if 'render_complete_callback' in sys.modules:\n"
-        "        del sys.modules['render_complete_callback']\n"
-        "    import render_complete_callback as _rcc\n"
-        "    _rcc.run_render_complete(nuke.thisGroup())\n"
-        "except Exception as _e:\n"
-        "    nuke.warning('[render_complete] failed: %s' % _e)\n"
-    )
+    _AFTER_RENDER_EXPR = "__import__('render_complete_callback').on_write_after_render()"
 
     def _wire_tk_after_render(*args, **kwargs):
         node = nuke.thisNode()
@@ -77,16 +114,19 @@ try:
             return
         knob = node.knob("tk_after_render")
         if knob is not None:
-            knob.setValue(_AFTER_RENDER_CMD)
+            knob.setValue(_AFTER_RENDER_EXPR)
 
     nuke.addOnUserCreate(_wire_tk_after_render, nodeClass="WriteTank")
-    nuke.addOnScriptLoad(
-        lambda: [
-            n.knob("tk_after_render").setValue(_AFTER_RENDER_CMD)
-            for n in nuke.allNodes("WriteTank")
-            if n.knob("tk_after_render") is not None
-        ]
-    )
+
+    def _wire_all_on_script_load():
+        for n in nuke.allNodes("WriteTank"):
+            knob = n.knob("tk_after_render")
+            if knob is not None:
+                knob.setValue(_AFTER_RENDER_EXPR)
+
+    nuke.addOnScriptLoad(_wire_all_on_script_load)
+
+    nuke.addOnScriptLoad(_wire_all_on_script_load)
 except Exception as _exc:
     nuke.warning("[render_complete] Could not register callback: %s" % _exc)
 
