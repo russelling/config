@@ -134,7 +134,7 @@ class SceneOperation(HookClass):
             if hasattr(engine, "save_context_to_script"):
                 engine.save_context_to_script()
             if self._is_first_version(context):
-                self._build_color_template(context)
+                self._build_color_template(context, engine)
                 nuke.scriptSave()
             return resolved
 
@@ -153,7 +153,7 @@ class SceneOperation(HookClass):
                 nuke.scriptSaveAs(resolved, overwrite=0)
                 if hasattr(engine, "save_context_to_script"):
                     engine.save_context_to_script()
-                self._build_color_template(context)
+                self._build_color_template(context, engine)
                 nuke.scriptSave()
             return True
 
@@ -231,11 +231,36 @@ class SceneOperation(HookClass):
         """Normalise path separators to forward slashes for Nuke."""
         return path.replace("\\", "/")
 
+    @staticmethod
+    def _debug_log(message):
+        """
+        Write a line to a plain text file on the network share, bypassing
+        Nuke's logging APIs entirely. Use this for diagnosing failures that
+        don't appear in the Script Editor or tk-nuke.log (e.g. when
+        workfiles2 callbacks run before/without a visible Nuke GUI panel).
+
+        Safe to leave in place permanently - it's a no-op cost-wise and a
+        cheap insurance policy against another silent-failure debugging
+        session like 2026-06-16.
+        """
+        try:
+            log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            log_path = os.path.join(log_dir, "scene_op_debug.log")
+            import datetime
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_path, "a") as f:
+                f.write("[%s] %s\n" % (stamp, message))
+        except Exception:
+            # Never let logging itself break the calling code.
+            pass
+
     # -------------------------------------------------------------------------
     # Color template builder
     # -------------------------------------------------------------------------
 
-    def _build_color_template(self, context):
+    def _build_color_template(self, context, engine):
         tk     = self.parent.sgtk
         fields = self._fields(context)
 
@@ -248,7 +273,7 @@ class SceneOperation(HookClass):
         render_template = tk.templates.get("ep_nuke_shot_render_work")
         if render_template:
             render_fields = dict(fields)
-            render_fields["nuke.output"] = "beauty"
+            render_fields["output"] = "beauty"
             render_fields["version"] = 1
             try:
                 render_path = render_template.apply_fields(render_fields)
@@ -344,6 +369,10 @@ class SceneOperation(HookClass):
             # warning filters or Script Editor visibility timing) and write
             # to root-level error log too for guaranteed capture.
             nuke.tprint("[scene_op] tk-nuke-writenode fallback triggered. Exception was:\n%s" % _trace)
+            self._debug_log(
+                "tk-nuke-writenode fallback triggered for shot=%s. Exception: %r\n%s"
+                % (shot, _wn_exc, _trace)
+            )
             try:
                 nuke.warning("[scene_op] tk-nuke-writenode fallback. See stdout for traceback. Error: %r" % _wn_exc)
             except Exception:
