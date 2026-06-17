@@ -36,69 +36,25 @@ import nuke
 import sgtk
 
 # ---------------------------------------------------------------------------
-# Render-complete dialog wiring
+# Send to Review button wiring
 #
-# CONFIRMED 2026-06-17: WriteTank nodes do NOT have a "tk_after_render" knob.
-# (Checked directly: node.knobs().keys() on a real WriteTank node returns
-# only ['render_mode'] among render/after/tk_-related names.) The previous
-# version of this block assumed that knob existed and populated it with a
-# multi-line script - which silently did nothing, since the `if knob is not
-# None` guard always failed.
+# Adds a manual "Send to Review" button knob to each WriteTank node. The
+# artist renders EXRs, reviews them, and clicks the button on the node that
+# produced them to write a review flag JSON for the Mac Studio watcher.
 #
-# The knob that DOES exist and DOES fire is the stock Nuke Write node
-# "Python" tab -> "afterRender" field. Nuke evaluates that field as a
-# SINGLE Python expression, not a multi-statement script - multi-line text
-# (import/try/except blocks) raises "invalid syntax (<string>, line 1)"
-# because Nuke compiles the whole knob value as one expression and chokes
-# on the first newline.
+# HISTORY (2026-06-17): we first tried to trigger the review flag
+# automatically after render via the WriteTank gizmo's tk_after_render knob
+# (read by tk-nuke-writenode v1.7.2 handler.py on_after_render_gizmo_callback,
+# which runs the knob value through exec()). That path proved unreliable in
+# practice and was abandoned in favor of this explicit button, which is
+# strictly better here: it only runs when the artist intends it, runs in the
+# node's own context (so nuke.thisNode() is the right node), and a human is
+# present when it executes. A PyScript_Knob button is the correct use of a
+# custom knob on this node - unlike the afterRender field, which fought us.
 #
-# So we wire afterRender to a single expression that calls one stable
-# entry point in render_complete_callback.py. All multi-line logic (sys.path
-# setup, module reload, error handling) lives in that function instead -
-# never re-pasted into a knob. Future changes to render-complete behavior
-# only require editing render_complete_callback.py; every Write node, old
-# or new, picks up the change automatically because they all just call the
-# same function by name.
-#
-# We do NOT use nuke.addAfterRender() here. That registers a callback at
-# the Python-session level, which only exists if this hook module was
-# imported via Toolkit's engine bootstrap in a live Nuke session. On a
-# Deadline render farm, jobs are frequently launched via command-line or
-# slave processes that may not run that bootstrap at all, so the callback
-# would silently never fire. The knob-based wiring below is saved directly
-# in the .nk script and fires regardless of how the render is launched.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Render-complete dialog wiring
-#
-# CONFIRMED 2026-06-17 against tk-nuke-writenode v1.7.2 source
-# (handler.py, on_after_render_gizmo_callback, line ~843):
-#
-#     grp = nuke.thisGroup()
-#     cmd = grp.knob("tk_after_render").value()
-#     if cmd:
-#         exec(cmd)
-#
-# So tk_after_render IS the correct knob, and it lives on the WriteTank
-# group node (grp = nuke.thisGroup()), not on the internal Write1 node.
-# tk-nuke-writenode creates this knob itself as part of the gizmo; this
-# hook only needs to set its value once the node exists.
-#
-# The earlier bug was the VALUE we put in that knob: a multi-line script
-# string. tk-nuke-writenode runs the knob value through Python's exec(),
-# and a multi-line string with embedded '\n' literals can still fail to
-# round-trip cleanly through Nuke's knob value storage/exec() depending on
-# quoting - confirmed by an actual SyntaxError pointing at the literal
-# 'render_complete_callback' string when the multi-line version was used.
-# A single-statement expression avoids the whole class of problem:
-#
-#     __import__('render_complete_callback').on_write_after_render()
-#
-# All real logic (sys.path setup, module reload, try/except) lives inside
-# on_write_after_render() in render_complete_callback.py - never re-pasted
-# into a knob string. Future changes only require editing that one
-# function; every WriteTank node, old or new, picks up the change because
-# they all just call it by name.
+# The button is added by config hook code (here), NOT by editing the gizmo
+# definition in install/, so it is tracked in git and survives
+# `tank cache_apps` without a manual reapply step.
 # ---------------------------------------------------------------------------
 try:
     import os as _os, sys as _sys
@@ -106,29 +62,39 @@ try:
     if _hooks_dir not in _sys.path:
         _sys.path.insert(0, _hooks_dir)
 
-    _AFTER_RENDER_EXPR = "__import__('render_complete_callback').on_write_after_render()"
+    # Primary review trigger: a "Send to Review" button knob on each
+    # WriteTank node. The afterRender knob approach was abandoned as
+    # unreliable (see PIPELINE_REFERENCE.md / 2026-06-17). The artist
+    # renders, reviews the EXRs, then clicks this button on the node that
+    # produced them, which writes the review flag JSON for the Mac Studio
+    # watcher. Single-expression call keeps the knob value robust.
+    _SEND_TO_REVIEW_CMD = "__import__('render_complete_callback').send_to_review()"
+    _REVIEW_KNOB_NAME = "send_to_review"
 
-    def _wire_tk_after_render(*args, **kwargs):
-        node = nuke.thisNode()
-        if not node:
+    def _add_review_button(node):
+        """Idempotently add the Send to Review button knob to a node."""
+        if node is None:
             return
-        knob = node.knob("tk_after_render")
-        if knob is not None:
-            knob.setValue(_AFTER_RENDER_EXPR)
+        if node.knob(_REVIEW_KNOB_NAME) is not None:
+            # Already present - just make sure the command is current.
+            node.knob(_REVIEW_KNOB_NAME).setCommand(_SEND_TO_REVIEW_CMD)
+            return
+        btn = nuke.PyScript_Knob(_REVIEW_KNOB_NAME, "Send to Review", _SEND_TO_REVIEW_CMD)
+        btn.setFlag(nuke.STARTLINE)
+        node.addKnob(btn)
 
-    nuke.addOnUserCreate(_wire_tk_after_render, nodeClass="WriteTank")
+    def _wire_review_button(*args, **kwargs):
+        _add_review_button(nuke.thisNode())
+
+    nuke.addOnUserCreate(_wire_review_button, nodeClass="WriteTank")
 
     def _wire_all_on_script_load():
         for n in nuke.allNodes("WriteTank"):
-            knob = n.knob("tk_after_render")
-            if knob is not None:
-                knob.setValue(_AFTER_RENDER_EXPR)
-
-    nuke.addOnScriptLoad(_wire_all_on_script_load)
+            _add_review_button(n)
 
     nuke.addOnScriptLoad(_wire_all_on_script_load)
 except Exception as _exc:
-    nuke.warning("[render_complete] Could not register callback: %s" % _exc)
+    nuke.warning("[render_complete] Could not register Send to Review button: %s" % _exc)
 
 HookClass = sgtk.get_hook_baseclass()
 
@@ -379,9 +345,9 @@ class SceneOperation(HookClass):
 
         # ── Write: TK Write Node (Primary EXR 32-bit) ────────────────────
         # We use tk-nuke-writenode's WriteTank gizmo so the file path is
-        # driven by the ep_nuke_shot_render_work template and the
-        # tk_after_render gizmo callback chain (which we wire to
-        # render_complete_callback) fires after every render.
+        # driven by the ep_nuke_shot_render_work template. The "Send to
+        # Review" button knob is added to this node by the wiring near the
+        # top of this module (via onUserCreate / onScriptLoad).
         y += y_step
         try:
             wn_app = engine.apps["tk-nuke-writenode"]

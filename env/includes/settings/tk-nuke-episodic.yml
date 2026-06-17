@@ -121,6 +121,19 @@ settings.tk-nuke.episodic.shot_step:
         tank_type: Rendered Image
         tile_color: []
         promote_write_knobs: []
+      - file_type: exr
+        name: "Primary EXR (16-bit DWAA)"
+        proxy_publish_template:
+        proxy_render_template:
+        publish_template: ep_nuke_shot_render_pub
+        render_template:  ep_nuke_shot_render_work
+        settings:
+          datatype: 16 bit half
+          compression: DWAA
+          dw_compression_level: 45
+        tank_type: Rendered Image
+        tile_color: []
+        promote_write_knobs: []
       location: "@apps.tk-nuke-writenode.location"
 
     tk-nuke-quickreview:

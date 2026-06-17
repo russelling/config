@@ -137,9 +137,28 @@ def run_render_complete(write_node):
     tk = engine.sgtk
     sg = engine.shotgun
 
-    # --- Resolve template fields from the Write node's output path ---
-    out_path = write_node["file"].value()
+    # --- Resolve the render output path ---
+    # Prefer the supported tk-nuke-writenode handler API, which computes the
+    # path correctly for the WriteTank gizmo. Only fall back to the raw
+    # `file` knob if the handler is unavailable, since on the WriteTank
+    # group node that knob is unreliable.
+    out_path = None
+    handler = _get_writenode_handler(engine)
+    if handler is not None:
+        try:
+            out_path = handler.compute_render_path(write_node)
+        except Exception as exc:
+            nuke.warning(
+                "[render_complete] compute_render_path failed, falling back "
+                "to file knob: %s" % exc
+            )
     if not out_path:
+        try:
+            out_path = write_node["file"].value()
+        except Exception:
+            out_path = None
+    if not out_path:
+        nuke.warning("[render_complete] Could not resolve render path; aborting.")
         return
 
     work_template = tk.templates["ep_nuke_shot_work"]
@@ -227,6 +246,100 @@ def _after_render():
         run_render_complete(write_node)
     except Exception as exc:
         nuke.warning("[render_complete] Error in afterRender callback: %s" % exc)
+
+
+# ---------------------------------------------------------------------------
+# Manual "Send to Review" button entry point
+#
+# This is the PRIMARY trigger (the afterRender knob approach proved
+# unreliable - see PIPELINE_REFERENCE.md / 2026-06-17 session notes). A
+# PyScript button knob is added to each WriteTank node by the wiring in
+# scene_operation_tk-nuke.py; the button calls:
+#
+#   __import__('render_complete_callback').send_to_review()
+#
+# The artist renders EXRs, reviews them, then clicks the button ON the
+# WriteTank node that produced them. Because the button lives on that node,
+# nuke.thisNode() resolves to it directly - no scanning or guessing which
+# render to flag.
+#
+# Unlike the afterRender path, this resolves the render path via the
+# supported tk-nuke-writenode handler API (compute_render_path /
+# get_files_on_disk) rather than reading the WriteTank group's `file`
+# knob (which is unreliable on the gizmo wrapper), and it verifies frames
+# actually exist on disk before writing a flag.
+# ---------------------------------------------------------------------------
+
+def _get_writenode_handler(engine):
+    """Return the tk-nuke-writenode app's handler instance, or None."""
+    try:
+        wn_app = engine.apps.get("tk-nuke-writenode")
+        if wn_app is None:
+            return None
+        # The handler is stored on the app; attribute name has been stable
+        # across tk-nuke-writenode versions as `get_handler()` or `handler`.
+        if hasattr(wn_app, "get_handler"):
+            return wn_app.get_handler()
+        return getattr(wn_app, "handler", None)
+    except Exception as exc:
+        nuke.warning("[render_complete] Could not get writenode handler: %s" % exc)
+        return None
+
+
+def send_to_review():
+    """
+    Invoked from the 'Send to Review' button on a WriteTank node.
+    Validates the node's frames exist, prompts the artist, and writes the
+    review flag JSON for the Mac Studio watcher to pick up.
+    """
+    try:
+        node = nuke.thisNode()
+        if node is None:
+            nuke.message("Send to Review: could not determine the node.")
+            return
+
+        engine = sgtk.platform.current_engine()
+        if engine is None:
+            nuke.message("Send to Review: no Flow (SGTK) engine running.")
+            return
+
+        handler = _get_writenode_handler(engine)
+
+        # Verify frames actually exist on disk before flagging. If we can't
+        # get the handler for some reason, fall back to a soft check so the
+        # artist isn't hard-blocked, but warn.
+        files_on_disk = []
+        if handler is not None:
+            try:
+                files_on_disk = handler.get_files_on_disk(node) or []
+            except Exception as exc:
+                nuke.warning(
+                    "[render_complete] get_files_on_disk failed, proceeding "
+                    "without disk check: %s" % exc
+                )
+                files_on_disk = None  # unknown, not "empty"
+        else:
+            files_on_disk = None  # unknown
+
+        if files_on_disk == []:
+            nuke.message(
+                "Send to Review: no rendered frames found for this Write "
+                "node yet.\n\nRender the node first, then click Send to "
+                "Review."
+            )
+            return
+
+        # Hand off to the shared flag-writing routine (prompts the artist
+        # and writes the JSON). run_render_complete reads the node's render
+        # path; pass the WriteTank node directly.
+        run_render_complete(node)
+
+    except Exception as exc:
+        nuke.warning("[render_complete] send_to_review failed: %s" % exc)
+        try:
+            nuke.message("Send to Review failed: %s" % exc)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
