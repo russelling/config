@@ -282,3 +282,42 @@ UE 5.7 uses Python 3.11.8. The py3.11 Windows vendor is the correct one.
 10. Prefer includes over duplication — shared blocks go in `env/includes/settings/`.
 
 
+
+
+---
+
+## 2026-06-16 session — major progress notes
+
+### ✅ What got working today
+
+- **Unreal Engine 5.7 integration** — ShotGrid menu, Loader, Publish, Workspace Info all functional on Windows. Required:
+  - `launch_builtin_plugins: []` in `tk-unreal.yml`
+  - `command_name: unreal_engine` in `tk-multi-launchapp.yml`
+  - `tank cache_apps` to download `tk-framework-unrealqt`
+  - Patched `engine.py` (`init_qt_app` Qt None-guard) — committed as `hooks/tk-unreal/engine.py`
+  - Patched `framework.py` (forces bundled PySide6 for partial-Qt UE 5.5+) — committed as `hooks/tk-framework-unrealqt/framework.py`
+  - Manually unpacked `v1.3.1-py3.11-win.zip` vendor zip into install folder
+- **Software entity for D: drive Unreal install** — created separately in ShotGrid Admin, with custom icon (uploaded). User decided to move D: install to C: instead so this may not be needed long-term.
+- **Mac Studio QT watcher daemon** — now running as a launchd service on `Buffalo-VFX-Perforce` (Buffalo's Mac Studio), using `/usr/bin/python3` + `PYTHONPATH` to import sgtk from `install/core/python`. Plist at `~/Library/LaunchAgents/com.buffalovfx.qtwatcher.plist`. Logs at `/Volumes/.../buffalo_flow_config/logs/`. Scripts in separate repo `BUF_Mac_watcher`.
+- **OIIO+FFmpeg bake routing** — `qt_watcher.py` now routes both shot and asset turntables through `qt_bake_oiio.py`, avoiding Nuke render license dependency.
+- **ShotGrid Script user for daemon authentication** — added to `core/shotgun.yml`. Verify it's gitignored before pushing.
+- **Render-complete flag JSON now uses Mac-style paths** — `render_complete_callback.py` now resolves `exr_path_pattern` via the `ep_nuke_shot_render_work` template with explicit `platform="mac"`, so flags are portable across Windows-rendered / Mac-watched setups.
+- **Turntable render templates** — `unreal_asset_turntable_render`, `unreal_asset_turntable_flag`, `unreal_asset_turntable_movie`, `unreal_maya_asset_fbx_publish`, `unreal_maya_turntable_*`, `unreal_movie_publish`, `unreal_asset_publish` all added to `core/templates.yml`.
+
+### ⏳ Outstanding — pick up here tomorrow
+
+**The render-complete dialog (`Submitted For` / `Description`) still does not appear when rendering from Nuke.** The root cause is partially understood but not fully diagnosed:
+
+- `tk_after_render` knob mechanism was wired into `scene_operation_tk-nuke.py` via `nuke.addOnUserCreate(_wire_tk_after_render, nodeClass="WriteTank")` — needs WriteTank nodes to fire
+- Color pipeline builder was upgraded to call `wn_app.create_new_write_node("Primary EXR (32-bit)")` instead of `nuke.createNode("Write", ...)` — but in the `prepare_new` workfiles2 path it silently falls back to plain Write
+- `prepare_new` branch added to `scene_operation_tk-nuke.py` (correct op string — `prepare_new`, NOT `prepare_new_scene`) — does fire and does build the color graph
+- Builder runs `nuke.scriptSaveAs(...)` before calling `_build_color_template(...)` so `create_new_write_node` has a context — but it still fails into the `except` branch
+- Critically: neither `nuke.tprint` nor `nuke.warning` from the fallback `except` block produces any visible output in Script Editor or `tk-nuke.log`
+- Running `wn_app.create_new_write_node("Primary EXR (32-bit)")` **directly in the Script Editor on a saved script succeeds** — produces a `FlowProductionTrackingWrite1` node
+- So the failure is specific to the timing/context of `prepare_new` execution. Next diagnostic step: **write any exception inside the `except` block to a file in `/Volumes/.../logs/scene_op_debug.log` instead of using Nuke's logging APIs**, since the standard channels are silent for unknown reasons.
+
+### Process risks discovered today
+
+- **`config` repo is not git-cloned on the Windows render machine.** All fixes pushed to GitHub must be pulled on the MacBook (via GitHub Desktop) and propagate to Windows via the network share. Missing this step was the root cause of multiple "fix didn't take effect" symptoms during the session.
+- **Windows Toolkit cache** at `C:\Users\{user}\AppData\Roaming\Shotgun\buffalovfx\p*.*` must be cleared after almost any engine settings or hook change, otherwise stale config persists.
+- The `BUF_Mac_watcher` repo is intentionally separate from `config` — do **not** copy its scripts into `config/scripts/` (would commit to the wrong repo). Plist points directly at the `BUF_Mac_watcher` location on the network share.
