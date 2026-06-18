@@ -1,25 +1,39 @@
 """
 render_complete_callback.py
 
-Registers an `afterRender` callback on Write nodes. When a render completes:
+Implements the "Send to Review" submission step for the QT review pipeline.
+
+A "Send to Review" button knob is added to each WriteTank node (wired in
+scene_operation_tk-nuke.py). The artist renders EXRs, reviews them, and
+clicks the button on the node that produced them, which:
 
   1. Prompts the artist with a small dialog:
-       - "Submitted For" dropdown (populated from the SG Version.sg_submitted_for
-         list field's valid values)
+       - "Submitted For" dropdown (populated from the SG Version
+         .sg_submitted_for list field's valid values)
        - "Description" text box (free text)
 
-  2. Gathers context (shot/episode/scene/step/version/artist/date/frame range)
+  2. Gathers metadata, resolving everything from the node's ACTUAL render
+     output rather than guessing:
+       - fields parsed from the resolved render path (so the output token,
+         version, etc. exactly match what was rendered)
+       - frame range derived from the rendered EXR files on disk (NOT the
+         project's global Root range, which reflects the edit conform)
+       - embedded source timecode read from the first EXR's header (the
+         render frame numbers are offset, but the burn-in TC must reflect
+         the source TC); may be None if the render carries no embedded TC
 
   3. Writes a JSON "render complete" flag file next to the EXR output, using
-     the `ep_nuke_shot_render_flag` template.
+     the `ep_nuke_shot_render_flag` template. The EXR path pattern inside
+     the flag is resolved for macOS ('darwin'), since the watcher runs on
+     the Mac Studio regardless of which OS submitted.
 
-  4. The Mac Studio watcher (qt_watcher.py) polls for these flag files and
-     does the actual bake/slate/burn-in/upload.
+  4. The Mac Studio watcher (BUF_Mac_watcher) polls for these flag files and
+     does the actual bake/slate/burn-in/upload to ShotGrid.
 
-NOTE: Currently fires automatically on every render. To switch to a manual
-"push button" trigger later, remove the nuke.addAfterRender() registration
-in `register()` below and instead call `run_render_complete(write_node)`
-from a custom menu command.
+HISTORY: An earlier version tried to fire automatically via Nuke's
+afterRender / the tk-nuke-writenode tk_after_render knob; that proved
+unreliable and was replaced by the explicit button (see PIPELINE_REFERENCE.md
+/ 2026-06-17 session notes).
 
 SG FIELD REQUIREMENT:
   Version entity needs a list field `sg_submitted_for` with valid values
@@ -101,10 +115,109 @@ def _get_submitted_for_options(sg):
     return FALLBACK_SUBMITTED_FOR
 
 
-def _frame_range():
-    """Full render range including handles, as set on the Root node."""
-    root = nuke.root()
-    return int(root["first_frame"].value()), int(root["last_frame"].value())
+def _frame_range_from_files(render_files, render_template):
+    """
+    Derive the actual rendered frame range from the list of EXR files on
+    disk, using the render template's SEQ key to extract each frame number.
+
+    This is the range of frames that were ACTUALLY rendered - not the
+    project's global range on the Root node (nuke.root()['first_frame'] /
+    ['last_frame']), which reflects the timeline/edit conform and can be
+    wildly different from what a given Write node produced.
+
+    Returns (first, last) ints, or (None, None) if it can't be determined.
+    """
+    if not render_files or render_template is None:
+        return (None, None)
+    frames = []
+    for f in render_files:
+        try:
+            flds = render_template.get_fields(f)
+            seq = flds.get("SEQ")
+            if seq is not None:
+                frames.append(int(seq))
+        except Exception:
+            # Skip any file that doesn't parse cleanly rather than failing
+            # the whole submission.
+            continue
+    if not frames:
+        return (None, None)
+    return (min(frames), max(frames))
+
+
+def _frame_range_root():
+    """
+    Fallback: the project's global render range on the Root node. Only used
+    when the rendered frames can't be enumerated. Note this is the
+    timeline/handle range, which may not match a specific Write node's
+    actual output.
+    """
+    try:
+        root = nuke.root()
+        return int(root["first_frame"].value()), int(root["last_frame"].value())
+    except Exception:
+        return (None, None)
+
+
+def _read_embedded_start_tc(exr_files, first_frame, render_template):
+    """
+    Read the embedded source timecode from the FIRST rendered EXR's header
+    and return it as a string (HH:MM:SS:FF), or None if no timecode is
+    embedded (some renders legitimately lack it).
+
+    The artist's render numbers are offset (e.g. 1001+), but the EXRs carry
+    the original source timecode in their headers. The burn-in TC must
+    reflect that embedded source TC, not the offset frame numbers - so we
+    capture the start TC here, at submission, and store it in the flag. The
+    Mac Studio watcher then increments from this start TC per frame.
+
+    Reads via a temporary, throwaway Read node so the artist's open script
+    is never modified. EXR timecode surfaces under different metadata keys
+    depending on the writer, so we try the common ones in order.
+    """
+    if not exr_files or first_frame is None:
+        return None
+
+    # Find the file matching first_frame (don't assume list order).
+    target = None
+    for f in exr_files:
+        try:
+            seq = render_template.get_fields(f).get("SEQ")
+            if seq is not None and int(seq) == int(first_frame):
+                target = f
+                break
+        except Exception:
+            continue
+    if target is None:
+        # Fall back to the first file we can parse.
+        target = exr_files[0]
+
+    read = None
+    try:
+        # forward slashes for Nuke regardless of OS
+        read = nuke.createNode("Read", inpanel=False)
+        read["file"].fromUserText(target.replace("\\", "/"))
+        # Metadata is frame-dependent; read at the first rendered frame.
+        meta_keys = ("input/timecode", "exr/timeCode", "exr/timecode")
+        tc = None
+        for key in meta_keys:
+            try:
+                val = read.metadata(key, int(first_frame))
+            except Exception:
+                val = None
+            if val:
+                tc = str(val).strip()
+                break
+        return tc or None
+    except Exception as exc:
+        nuke.warning("[render_complete] Could not read embedded timecode: %s" % exc)
+        return None
+    finally:
+        if read is not None:
+            try:
+                nuke.delete(read)
+            except Exception:
+                pass
 
 
 def _cut_range(sg, shot_entity_id):
@@ -143,13 +256,13 @@ def run_render_complete(write_node):
     # `file` knob if the handler is unavailable, since on the WriteTank
     # group node that knob is unreliable.
     out_path = None
-    handler = _get_writenode_handler(engine)
-    if handler is not None:
+    wn_app = _get_writenode_app(engine)
+    if wn_app is not None:
         try:
-            out_path = handler.compute_render_path(write_node)
+            out_path = wn_app.get_node_render_path(write_node)
         except Exception as exc:
             nuke.warning(
-                "[render_complete] compute_render_path failed, falling back "
+                "[render_complete] get_node_render_path failed, falling back "
                 "to file knob: %s" % exc
             )
     if not out_path:
@@ -158,22 +271,35 @@ def run_render_complete(write_node):
         except Exception:
             out_path = None
     if not out_path:
+        _debug_log("run_render_complete: EXIT - no render path")
         nuke.warning("[render_complete] Could not resolve render path; aborting.")
+        nuke.message("Send to Review: could not resolve the render path for this node.")
         return
 
-    work_template = tk.templates["ep_nuke_shot_work"]
     flag_template = tk.templates["ep_nuke_shot_render_flag"]
     render_work_template = tk.templates["ep_nuke_shot_render_work"]
 
-    fields = ctx.as_template_fields(work_template)
+    # Derive the template fields from the ACTUAL resolved render path the
+    # node renders to, rather than rebuilding them from context and guessing
+    # the output token. out_path came from the writenode app's
+    # get_node_render_path(), so it already carries the correct values
+    # (including whatever the 'output' token resolves to - or none, when the
+    # optional [_{nuke.output}] segment is empty). Skip SEQ so a concrete
+    # frame number in the path doesn't prevent the parse.
+    try:
+        fields = render_work_template.get_fields(out_path, skip_keys=["SEQ"])
+    except Exception as exc:
+        _debug_log("run_render_complete: EXIT - get_fields raised: %r" % exc)
+        nuke.warning("[render_complete] Could not parse render path fields: %s" % exc)
+        nuke.message(
+            "Send to Review: could not parse fields from the render path:\n%s" % exc
+        )
+        return
 
-    # output - use the write node's name, lowercased, as the output identifier
-    output_name = write_node.name().lower()
-    fields["output"] = output_name
-
-    # version - pull from current script's version via context fields if present,
-    # otherwise try to parse from the write path
-    fields.setdefault("version", fields.get("version", 1))
+    # The output token (if any) is whatever the path resolved to - we do NOT
+    # override it with the node name. It may legitimately be absent when the
+    # optional {nuke.output} template segment is empty.
+    output_name = fields.get("output")
 
     # Build the EXR pattern from the template/fields rather than trusting the
     # raw Write node file knob, which can be stale or hand-edited and drift
@@ -183,21 +309,51 @@ def run_render_complete(write_node):
     # The watcher daemon that consumes this flag always runs on the Mac
     # Studio, regardless of which OS this hook fires from. Always resolve
     # the Mac-style path here so the flag is portable across platforms.
-    resolved_exr_pattern = render_work_template.apply_fields(
-        render_work_fields, platform="mac"
-    )
+    # NOTE: Toolkit uses Python sys.platform names for the platform arg -
+    # 'darwin' for macOS (NOT 'mac'), 'win32' for Windows, 'linux' for Linux.
+    try:
+        resolved_exr_pattern = render_work_template.apply_fields(
+            render_work_fields, platform="darwin"
+        )
+    except Exception as exc:
+        _debug_log("run_render_complete: EXIT - render_work apply_fields raised: %r" % exc)
+        nuke.warning("[render_complete] EXR pattern resolution failed: %s" % exc)
+        nuke.message("Send to Review: could not resolve render path template:\n%s" % exc)
+        return
 
     # --- Prompt artist ---
     submitted_for_options = _get_submitted_for_options(sg)
     dialog = RenderCompleteDialog(submitted_for_options)
     if not dialog.exec_():
         # Artist cancelled - do not write flag
+        _debug_log("run_render_complete: EXIT - dialog cancelled/closed")
         return
     values = dialog.values()
 
     # --- Gather metadata ---
-    first_frame, last_frame = _frame_range()
+    # Prefer the ACTUAL rendered frame range (parsed from the EXR files on
+    # disk) over the project's global Root range, which reflects the
+    # timeline/edit conform and can differ wildly from a given Write node's
+    # real output.
+    render_files = []
+    if wn_app is not None:
+        try:
+            render_files = wn_app.get_node_render_files(write_node) or []
+        except Exception as exc:
+            nuke.warning("[render_complete] get_node_render_files failed: %s" % exc)
+            render_files = []
+    first_frame, last_frame = _frame_range_from_files(render_files, render_work_template)
+    if first_frame is None:
+        # Fall back to the Root range only if we couldn't enumerate frames.
+        first_frame, last_frame = _frame_range_root()
     cut_in, cut_out = _cut_range(sg, ctx.entity["id"]) if ctx.entity else (None, None)
+
+    # Embedded source timecode at the first rendered frame. The render frame
+    # numbers are offset (clean 1001+), but the QT burn-in TC must reflect
+    # the EXR's embedded source TC. Captured here at submission; the watcher
+    # increments from this start TC. May be None if the render carries no
+    # embedded timecode (handled gracefully downstream).
+    start_tc = _read_embedded_start_tc(render_files, first_frame, render_work_template)
 
     flag_data = {
         "project_id": ctx.project["id"] if ctx.project else None,
@@ -214,6 +370,7 @@ def run_render_complete(write_node):
         "date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "frame_first": first_frame,
         "frame_last": last_frame,
+        "start_timecode": start_tc,
         "cut_in": cut_in,
         "cut_out": cut_out,
         "exr_path_pattern": resolved_exr_pattern,
@@ -227,7 +384,9 @@ def run_render_complete(write_node):
         flag_fields = dict(fields)
         flag_path = flag_template.apply_fields(flag_fields)
     except Exception as exc:
+        _debug_log("run_render_complete: EXIT - flag_template apply_fields raised: %r" % exc)
         nuke.warning("[render_complete] Could not resolve flag path: %s" % exc)
+        nuke.message("Send to Review: could not resolve flag path:\n%s" % exc)
         return
 
     flag_dir = os.path.dirname(flag_path)
@@ -238,14 +397,7 @@ def run_render_complete(write_node):
         json.dump(flag_data, f, indent=2)
 
     nuke.tprint("[render_complete] Flag written: %s" % flag_path)
-
-
-def _after_render():
-    write_node = nuke.thisNode()
-    try:
-        run_render_complete(write_node)
-    except Exception as exc:
-        nuke.warning("[render_complete] Error in afterRender callback: %s" % exc)
+    nuke.message("Sent to Review.\n\nFlag written:\n%s" % flag_path)
 
 
 # ---------------------------------------------------------------------------
@@ -270,20 +422,30 @@ def _after_render():
 # actually exist on disk before writing a flag.
 # ---------------------------------------------------------------------------
 
-def _get_writenode_handler(engine):
-    """Return the tk-nuke-writenode app's handler instance, or None."""
+def _get_writenode_app(engine):
+    """Return the tk-nuke-writenode app instance, or None."""
     try:
-        wn_app = engine.apps.get("tk-nuke-writenode")
-        if wn_app is None:
-            return None
-        # The handler is stored on the app; attribute name has been stable
-        # across tk-nuke-writenode versions as `get_handler()` or `handler`.
-        if hasattr(wn_app, "get_handler"):
-            return wn_app.get_handler()
-        return getattr(wn_app, "handler", None)
+        return engine.apps.get("tk-nuke-writenode")
     except Exception as exc:
-        nuke.warning("[render_complete] Could not get writenode handler: %s" % exc)
+        nuke.warning("[render_complete] Could not get writenode app: %s" % exc)
         return None
+
+
+def _debug_log(message):
+    """
+    Append a line to a plain text log on disk, bypassing Nuke's logging
+    APIs entirely. For diagnosing button-click behavior that doesn't surface
+    in the Script Editor. Safe to leave in place - cheap and self-contained.
+    """
+    try:
+        log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        with open(os.path.join(log_dir, "send_to_review_debug.log"), "a") as f:
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write("[%s] %s\n" % (stamp, message))
+    except Exception:
+        pass
 
 
 def send_to_review():
@@ -303,18 +465,18 @@ def send_to_review():
             nuke.message("Send to Review: no Flow (SGTK) engine running.")
             return
 
-        handler = _get_writenode_handler(engine)
+        wn_app = _get_writenode_app(engine)
 
         # Verify frames actually exist on disk before flagging. If we can't
-        # get the handler for some reason, fall back to a soft check so the
+        # get the app for some reason, fall back to a soft check so the
         # artist isn't hard-blocked, but warn.
         files_on_disk = []
-        if handler is not None:
+        if wn_app is not None:
             try:
-                files_on_disk = handler.get_files_on_disk(node) or []
+                files_on_disk = wn_app.get_node_render_files(node) or []
             except Exception as exc:
                 nuke.warning(
-                    "[render_complete] get_files_on_disk failed, proceeding "
+                    "[render_complete] get_node_render_files failed, proceeding "
                     "without disk check: %s" % exc
                 )
                 files_on_disk = None  # unknown, not "empty"
@@ -322,6 +484,7 @@ def send_to_review():
             files_on_disk = None  # unknown
 
         if files_on_disk == []:
+            _debug_log("send_to_review: EXIT - no frames on disk")
             nuke.message(
                 "Send to Review: no rendered frames found for this Write "
                 "node yet.\n\nRender the node first, then click Send to "
@@ -335,59 +498,10 @@ def send_to_review():
         run_render_complete(node)
 
     except Exception as exc:
+        _debug_log("send_to_review: EXCEPTION %r" % exc)
         nuke.warning("[render_complete] send_to_review failed: %s" % exc)
         try:
             nuke.message("Send to Review failed: %s" % exc)
         except Exception:
             pass
-
-
-# ---------------------------------------------------------------------------
-# Single-line entry point for the stock Write node "afterRender" knob
-#
-# Nuke's native Write node Python tab "afterRender" field evaluates as a
-# SINGLE Python expression, not a multi-statement script (unlike a
-# PythonScript-class knob). It cannot contain import/try/except blocks -
-# doing so raises "invalid syntax (<string>, line 1)" because Nuke compiles
-# the knob text as one expression and chokes on the first line break.
-#
-# To keep "one external script, every Write node calls it, future changes
-# propagate automatically" working with that constraint, wire every Write
-# node's afterRender knob to a single expression that calls this function:
-#
-#   __import__('render_complete_callback').on_write_after_render()
-#
-# All the multi-line logic (sys.path setup, module reload, error handling)
-# lives here instead, in actual Python source - never re-pasted into knobs.
-# ---------------------------------------------------------------------------
-
-def on_write_after_render():
-    try:
-        write_node = nuke.thisNode()
-        run_render_complete(write_node)
-    except Exception as exc:
-        nuke.warning("[render_complete] on_write_after_render failed: %s" % exc)
-
-
-# ---------------------------------------------------------------------------
-# Registration
-#
-# NOTE: nuke.addAfterRender() is intentionally NOT used here. It only fires
-# within a live Nuke session where this module was imported via Toolkit's
-# engine bootstrap (scene_operation_tk-nuke.py). On a Deadline render farm,
-# jobs are frequently launched via command-line/slave processes that may
-# not go through that bootstrap at all, so the callback would silently
-# never fire. The knob-based afterRender wiring on each Write node is saved
-# directly in the .nk script and fires regardless of how the render is
-# launched (interactive, command-line, or Deadline slave) - see
-# on_write_after_render() above and _wire_after_render() in
-# scene_operation_tk-nuke.py.
-#
-# register() is kept as a no-op placeholder in case a future use case needs
-# session-only behavior (e.g. a non-render-farm dev/test mode).
-# ---------------------------------------------------------------------------
-
-def register():
-    pass
-
 
