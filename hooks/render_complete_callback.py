@@ -49,13 +49,13 @@ import getpass
 import datetime
 
 import nuke
-
-try:
-    from PySide2 import QtWidgets
-except ImportError:
-    from PySide import QtGui as QtWidgets  # Nuke 10 fallback
-
 import sgtk
+
+# Use the engine's Qt binding rather than importing PySide* directly. The
+# QtImporter returns whatever binding the running engine loaded (PySide6 on
+# Nuke 16+, PySide2 on Nuke 11-15) and folds all QtWidgets classes into the
+# QtGui shim, so QtGui.QDialog etc. resolve on every supported Nuke version.
+from sgtk.platform.qt import QtGui
 
 
 FALLBACK_SUBMITTED_FOR = ["Internal Review", "Supervisor", "Editorial", "Client"]
@@ -65,26 +65,26 @@ FALLBACK_SUBMITTED_FOR = ["Internal Review", "Supervisor", "Editorial", "Client"
 # Dialog
 # ---------------------------------------------------------------------------
 
-class RenderCompleteDialog(QtWidgets.QDialog):
+class RenderCompleteDialog(QtGui.QDialog):
     def __init__(self, submitted_for_options, parent=None):
         super(RenderCompleteDialog, self).__init__(parent)
         self.setWindowTitle("Render Complete")
 
-        layout = QtWidgets.QVBoxLayout(self)
+        layout = QtGui.QVBoxLayout(self)
 
-        layout.addWidget(QtWidgets.QLabel("Submitted For:"))
-        self.submitted_for = QtWidgets.QComboBox()
+        layout.addWidget(QtGui.QLabel("Submitted For:"))
+        self.submitted_for = QtGui.QComboBox()
         self.submitted_for.addItems(submitted_for_options)
         layout.addWidget(self.submitted_for)
 
-        layout.addWidget(QtWidgets.QLabel("Description:"))
-        self.description = QtWidgets.QTextEdit()
+        layout.addWidget(QtGui.QLabel("Description:"))
+        self.description = QtGui.QTextEdit()
         self.description.setFixedHeight(80)
         layout.addWidget(self.description)
 
-        btn_row = QtWidgets.QHBoxLayout()
-        ok_btn = QtWidgets.QPushButton("Submit")
-        cancel_btn = QtWidgets.QPushButton("Cancel")
+        btn_row = QtGui.QHBoxLayout()
+        ok_btn = QtGui.QPushButton("Submit")
+        cancel_btn = QtGui.QPushButton("Cancel")
         ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(ok_btn)
