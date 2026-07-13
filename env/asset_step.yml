@@ -14,6 +14,7 @@ description: Apps and Engines related to Asset based work.
 
 includes:
 - ./includes/frameworks.yml
+- ./includes/settings/tk-blender.yml
 - ./includes/settings/tk-maya.yml
 - ./includes/settings/tk-nuke.yml
 - ./includes/settings/tk-shell.yml
@@ -24,6 +25,7 @@ includes:
 # configuration for all engines to load in an asset step context
 
 engines:
+  tk-blender: "@settings.tk-blender.asset_step"
   tk-maya:    "@settings.tk-maya.asset_step"
   tk-nuke:    "@settings.tk-nuke.asset_step"
   tk-shell:   "@settings.tk-shell.asset_step"

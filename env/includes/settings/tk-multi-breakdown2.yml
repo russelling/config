@@ -38,6 +38,14 @@ settings.tk-multi-breakdown2.maya:
   hook_scene_operations: '{self}/tk-maya_scene_operations.py'
   location: "@apps.tk-multi-breakdown2.location"
 
+# Blender
+# NOTE: assumes a tk-blender_scene_operations.py hook ships with the pinned
+# tk-multi-breakdown2 app_store version. Confirm this exists once tk-blender
+# is actually installed; if not, a custom hook will need to be authored.
+settings.tk-multi-breakdown2.blender:
+  hook_scene_operations: '{self}/tk-blender_scene_operations.py'
+  location: "@apps.tk-multi-breakdown2.location"
+
 # Nuke
 settings.tk-multi-breakdown2.nuke:
   hook_scene_operations: '{self}/tk-nuke_scene_operations.py'

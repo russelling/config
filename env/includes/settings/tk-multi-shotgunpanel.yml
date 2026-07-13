@@ -108,6 +108,28 @@ settings.tk-multi-shotgunpanel.maya:
       filters: {}
   location: "@apps.tk-multi-shotgunpanel.location"
 
+# blender
+settings.tk-multi-shotgunpanel.blender:
+  action_mappings:
+    PublishedFile:
+    - actions: [import]
+      filters: {published_file_type: Blender Scene}
+    - actions: [import]
+      filters: {published_file_type: Image}
+    - actions: [import]
+      filters: {published_file_type: Rendered Image}
+    - actions: [import]
+      filters: {published_file_type: Texture}
+    - actions: [publish_clipboard]
+      filters: {}
+    Task:
+    - actions: [assign_task, task_to_ip]
+      filters: {}
+    Version:
+    - actions: [quicktime_clipboard, sequence_clipboard, add_to_playlist]
+      filters: {}
+  location: "@apps.tk-multi-shotgunpanel.location"
+
 # nuke
 settings.tk-multi-shotgunpanel.nuke:
   action_mappings:

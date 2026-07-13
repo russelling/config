@@ -4,6 +4,7 @@ description: Apps and Engines when launching with a project only context.
 includes:
 - ./includes/frameworks.yml
 - ./includes/settings/tk-desktop.yml
+- ./includes/settings/tk-blender.yml
 - ./includes/settings/tk-maya.yml
 - ./includes/settings/tk-nuke.yml
 - ./includes/settings/tk-photoshopcc.yml
@@ -14,6 +15,7 @@ includes:
 
 engines:
   tk-desktop:      "@settings.tk-desktop.project"
+  tk-blender:      "@settings.tk-blender.project"
   tk-maya:         "@settings.tk-maya.project"
   tk-nuke:         "@settings.tk-nuke.project"
   tk-photoshopcc:  "@settings.tk-photoshopcc.project"

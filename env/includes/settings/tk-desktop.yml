@@ -36,6 +36,7 @@ settings.tk-desktop.project:
     tk-multi-launchapp: "@settings.tk-multi-launchapp"
     tk-multi-launchhiero: "@settings.tk-multi-launchapp.hiero"
     tk-multi-launchmari: "@settings.tk-multi-launchapp.mari"
+    tk-multi-launchblender: "@settings.tk-multi-launchapp.blender"
     tk-multi-launchmotionbuilder: "@settings.tk-multi-launchapp.motionbuilder"
     tk-multi-launchunreal: "@settings.tk-multi-launchapp.unreal"
     tk-multi-publish2: "@settings.tk-multi-publish2.standalone"

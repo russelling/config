@@ -25,6 +25,10 @@ engines.tk-alias.location:
   type: app_store
   name: tk-alias
   version: v4.4.0
+engines.tk-blender.location:
+  type: app_store
+  name: tk-blender
+  version: v1.0.0
 engines.tk-desktop.location:
   type: app_store
   name: tk-desktop

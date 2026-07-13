@@ -165,6 +165,20 @@ paths:
     ep_maya_shot_snapshot:
         definition: '@shot_root/maya/work/snapshots/{Shot}_{Step}_v{version}_{timestamp}.{maya_extension}'
 
+    # ── Blender ──────────────────────────────────────────────────────────────
+    shot_work_area_blender:
+        definition: '@shot_root/blender/work'
+    shot_publish_area_blender:
+        definition: '@shot_root/blender/publish'
+
+    ep_blender_shot_work:
+        definition: '@shot_root/blender/work/{Shot}_{Step}_v{version}.blend'
+    ep_blender_shot_publish:
+        definition: '@shot_root/blender/publish/{Shot}_{Step}_v{version}.blend'
+
+    ep_blender_shot_snapshot:
+        definition: '@shot_root/blender/work/snapshots/{Shot}_{Step}_v{version}_{timestamp}.blend'
+
     # ── Renders (shot level) ──────────────────────────────────────────────────
     ep_nuke_shot_render_work:
         definition: '@shot_base/render/work/{Shot}_{Step}[_{nuke.output}]_v{version}/{Shot}_{Step}[_{nuke.output}]_v{version}.{SEQ}.exr'

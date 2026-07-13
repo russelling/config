@@ -53,6 +53,16 @@ settings.tk-multi-launchapp.mari:
   menu_name: Mari
   location: "@apps.tk-multi-launchapp.location"
 
+# blender
+settings.tk-multi-launchapp.blender:
+  engine: tk-blender
+  icon: "{target_engine}/icon_256.png"
+  linux_path: "@path.linux.blender"
+  mac_path: "@path.mac.blender"
+  windows_path: "@path.windows.blender"
+  menu_name: Blender
+  location: "@apps.tk-multi-launchapp.location"
+
 # motionbuilder
 settings.tk-multi-launchapp.motionbuilder:
   engine: tk-motionbuilder
