@@ -23,7 +23,7 @@ path.windows.mari: C:\Program Files\Mari7.5v2\Bundle\bin\Mari7.5v2.exe
 # locations/versions per platform.
 path.linux.blender: "/usr/bin/blender"
 path.mac.blender: "/Applications/Blender.app/Contents/MacOS/Blender"
-path.windows.blender: C:\Program Files\Blender Foundation\Blender\blender.exe
+path.windows.blender: C:\Program Files\Blender Foundation\Blender 5.0\blender.exe
 
 # Motionbuilder
 path.windows.motionbuilder: C:\Program Files\Autodesk\MotionBuilder 2027\bin\x64\motionbuilder.exe

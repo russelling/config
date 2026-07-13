@@ -122,6 +122,24 @@ keys:
         type: str
         shotgun_entity_type: Task
         shotgun_field_name: content
+    # Original filename (no extension) of a vendor/external delivery, preserved
+    # so the raw source is traceable back to what the vendor sent.
+    original_basename:
+        type: str
+
+    # Source format of an incoming asset delivery, prior to USD conversion.
+    ingest_extension:
+        type: str
+        choices:
+            fbx: FBX
+            obj: OBJ
+            abc: Alembic
+            gltf: glTF (JSON)
+            glb: glTF (binary)
+            usd: USD
+            usdc: USD (binary)
+            usda: USD (ASCII)
+            usdz: USD (zipped)
 
 paths:
 
@@ -488,6 +506,18 @@ paths:
 
     ep_nuke_shot_render_flag:
         definition: '@shot_base/render/work/{Shot}_{Step}[_{nuke.output}]_v{version}/.render_complete_{Shot}_{Step}[_{nuke.output}]_v{version}.json'
+
+  # Raw, untouched vendor/downloaded file -- lands in the EXISTING
+  # asset_source_area ('raw scans, purchased assets, original deliverables'),
+  # not a new folder.
+    asset_ingest_source_file:
+        definition: '@asset_source_area/{original_basename}.{ingest_extension}'
+
+  # Converted, pipeline-standard USD -- lands in the EXISTING shared
+  # asset_publish_area, named consistently with maya_asset_publish /
+  # blender_asset_publish's "{Asset}_{name}_v{version}.{ext}" pattern.
+    asset_usd_publish_file:
+        definition: '@asset_publish_area/{Asset}_ingest_v{version}.usd'
 
 strings:
     nuke_shot_version_name: "{Shot}_{Step}[_{nuke.output}]_v{version}.{iteration}"
