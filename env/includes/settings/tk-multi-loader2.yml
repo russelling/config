@@ -156,16 +156,37 @@ settings.tk-multi-loader2.maya:
   location: "@apps.tk-multi-loader2.location"
 
 # blender
-# NOTE: action names below assume a default tk-multi-loader2 "import" action
-# hook for Blender (link/append). Verify against the actual tk-blender +
-# tk-multi-loader2 hook shipped once installed, and adjust action names if
-# the studio's Blender actions hook uses different identifiers.
 settings.tk-multi-loader2.blender:
+  actions_hook: '{engine}/tk-multi-loader2/tk-blender_actions.py'
   action_mappings:
-    Blender Scene: [import]
-    Image: [import]
-    Rendered Image: [import]
-    Texture: [import]
+    Alembic Cache: [import]
+    Abc File: [import]
+    Dae File: [import]
+    Collada File: [import]
+    Bvh File: [import]
+    Motion Capture File: [import]
+    Svg File: [import]
+    Scalable Vector Graphics File: [import]
+    Ply File: [import]
+    Stanford File: [import]
+    Stl File: [import]
+    Glb File: [import]
+    Gltf File: [import]
+    Obj File: [import]
+    Wavefront File: [import]
+    X3d File: [import]
+    Wrl File: [import]
+    X3d Extensible 3D File: [import]
+    Blender Project File: [link, append]
+    Wav File: [asSequencerSound]
+    Sound File: [asSequencerSound]
+    Movie File: [asSequencerMovie, asCompositorNodeMovieClip]
+    Image File: [asSequencerImage, asCompositorNodeImage]
+    Texture File: [asSequencerImage, asCompositorNodeImage]
+    Sound: [asSequencerSound]
+    Movie: [asSequencerMovie, asCompositorNodeMovieClip]
+    Image: [asSequencerImage, asCompositorNodeImage]
+    Texture: [asSequencerImage, asCompositorNodeImage]
   entities:
   - caption: Assets
     entity_type: Asset
@@ -185,7 +206,6 @@ settings.tk-multi-loader2.blender:
     hierarchy: [entity, content]
   publish_filters: [["sg_status_list", "is_not", null]]
   location: "@apps.tk-multi-loader2.location"
-
 # nuke
 settings.tk-multi-loader2.nuke:
   action_mappings:

@@ -26,9 +26,9 @@ engines.tk-alias.location:
   name: tk-alias
   version: v4.4.0
 engines.tk-blender.location:
-  type: app_store
-  name: tk-blender
-  version: v1.0.0
+  type: git
+  path: https://github.com/diegogarciahuerta/tk-blender
+  version: v1.1.1
 engines.tk-desktop.location:
   type: app_store
   name: tk-desktop

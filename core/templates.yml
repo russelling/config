@@ -171,13 +171,18 @@ paths:
     shot_publish_area_blender:
         definition: '@shot_root/blender/publish'
 
+    # NOTE: unlike Maya/Nuke, Blender work/publish files get their own
+    # per-version subfolder. Blender's linked/appended libraries resolve by
+    # relative path, so multiple versions sharing one folder risks a newer
+    # save silently breaking an older version's links. This matches the
+    # pattern used by the reference tk-blender engine config.
     ep_blender_shot_work:
-        definition: '@shot_root/blender/work/{Shot}_{Step}_v{version}.blend'
+        definition: '@shot_root/blender/work/{Shot}_{Step}_v{version}/{Shot}_{Step}_v{version}.blend'
     ep_blender_shot_publish:
-        definition: '@shot_root/blender/publish/{Shot}_{Step}_v{version}.blend'
+        definition: '@shot_root/blender/publish/{Shot}_{Step}_v{version}/{Shot}_{Step}_v{version}.blend'
 
     ep_blender_shot_snapshot:
-        definition: '@shot_root/blender/work/snapshots/{Shot}_{Step}_v{version}_{timestamp}.blend'
+        definition: '@shot_root/blender/work/snapshots/{Shot}_{Step}_v{version}/{Shot}_{Step}_v{version}_{timestamp}.blend'
 
     # ── Renders (shot level) ──────────────────────────────────────────────────
     ep_nuke_shot_render_work:

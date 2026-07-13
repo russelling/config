@@ -112,14 +112,6 @@ settings.tk-multi-shotgunpanel.maya:
 settings.tk-multi-shotgunpanel.blender:
   action_mappings:
     PublishedFile:
-    - actions: [import]
-      filters: {published_file_type: Blender Scene}
-    - actions: [import]
-      filters: {published_file_type: Image}
-    - actions: [import]
-      filters: {published_file_type: Rendered Image}
-    - actions: [import]
-      filters: {published_file_type: Texture}
     - actions: [publish_clipboard]
       filters: {}
     Task:
