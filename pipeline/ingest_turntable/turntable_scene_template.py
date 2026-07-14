@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 
 import bpy
+from bpy_extras import anim_utils
 
 
 def _clear_scene():
@@ -127,7 +128,10 @@ def build_turntable(
     asset_root_obj.rotation_euler = (0, 0, math.radians(360 * turns))
     asset_root_obj.keyframe_insert(data_path="rotation_euler", index=2, frame=frame_end)
 
-    for fcurve in asset_root_obj.animation_data.action.fcurves:
+    action = asset_root_obj.animation_data.action
+    action_slot = asset_root_obj.animation_data.action_slot
+    channelbag = anim_utils.action_get_channelbag_for_slot(action, action_slot)
+    for fcurve in channelbag.fcurves:
         for kp in fcurve.keyframe_points:
             kp.interpolation = "LINEAR"
 

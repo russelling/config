@@ -277,6 +277,7 @@ def _parse_blender_args():
 
 def _do_render_in_blender(args):
     import bpy
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     import turntable_scene_template as tts
 
     bpy.ops.wm.read_factory_settings(use_empty=True)

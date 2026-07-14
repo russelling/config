@@ -96,8 +96,8 @@ turntable:
   frame_end: 120
   fps: 24
   resolution: [1920, 1080]
-  # "EEVEE_NEXT" (fast, default) or "CYCLES" (slower, higher fidelity)
-  render_engine: EEVEE_NEXT
+  # "BLENDER_EEVEE" (fast, default) or "CYCLES" (slower, higher fidelity)
+  render_engine: BLENDER_EEVEE
   # Rendered frames are EXR, not a display-referred format: the existing
   # qt_watcher / qt_bake_oiio.py pipeline (see README "qt_watcher
   # integration") expects scene-linear ACEScg EXRs as input, the same as a
