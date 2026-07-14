@@ -137,7 +137,7 @@ keys:
             abc: Alembic
             gltf: glTF (JSON)
             glb: glTF (binary)
-	    max: 3ds Max
+            max: 3ds Max
             usd: USD
             usdc: USD (binary)
             usda: USD (ASCII)
