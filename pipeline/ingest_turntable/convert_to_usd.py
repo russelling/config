@@ -210,6 +210,30 @@ def _import_source(bpy_module, source: Path, max_addon_module=None, max_import_o
         raise ValueError(f"No Blender importer wired up for .{ext}")
 
 
+def _usd_export_kwargs(bpy_module, dest: Path) -> dict:
+    """Only pass kwargs this Blender build's usd_export operator actually
+    supports -- confirmed 'export_textures' does not exist on Blender 5.1.2
+    even though older Blender releases accept it."""
+    desired = {
+        "filepath": str(dest),
+        "export_materials": True,
+        "export_textures": True,
+        "export_uvmaps": True,
+        "export_normals": True,
+        "export_animation": False,
+        "evaluation_mode": "RENDER",
+    }
+    try:
+        valid_props = set(bpy_module.ops.wm.usd_export.get_rna_type().properties.keys())
+    except Exception:
+        return desired
+    kwargs = {k: v for k, v in desired.items() if k in valid_props}
+    dropped = set(desired) - set(kwargs)
+    if dropped:
+        print(f"[convert_to_usd] NOTE: this Blender build's wm.usd_export operator does not support {sorted(dropped)} -- dropped from the export call.")
+    return kwargs
+
+
 def _do_conversion_in_blender(input_path: str, output_path: str, max_addon_module=None, max_import_operator=None, max_filepath_arg="filepath"):
     import bpy
 
@@ -223,15 +247,7 @@ def _do_conversion_in_blender(input_path: str, output_path: str, max_addon_modul
 
     _import_source(bpy, source, max_addon_module, max_import_operator, max_filepath_arg)
 
-    bpy.ops.wm.usd_export(
-        filepath=str(dest),
-        export_materials=True,
-        export_textures=True,
-        export_uvmaps=True,
-        export_normals=True,
-        export_animation=False,
-        evaluation_mode="RENDER",
-    )
+    bpy.ops.wm.usd_export(**_usd_export_kwargs(bpy, dest))
     print(f"[convert_to_usd] wrote {dest}")
 
 
