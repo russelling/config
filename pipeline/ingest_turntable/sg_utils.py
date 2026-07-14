@@ -167,6 +167,15 @@ def valid_list_values(sg: Any, entity_type: str, field_name: str) -> Optional[se
     return None
 
 
+def find_or_create_published_file_type(sg: Any, code: str) -> dict:
+    """Look up a PublishedFileType by its `code` field."""
+    existing = sg.find_one("PublishedFileType", [["code", "is", code]])
+    if existing:
+        return existing
+    log.info("Creating new PublishedFileType '%s' (did not already exist in ShotGrid)", code)
+    return sg.create("PublishedFileType", {"code": code})
+
+
 def next_version_number(sg: Any, entity: dict, published_file_type: str) -> int:
     existing = sg.find(
         "PublishedFile",

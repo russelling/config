@@ -22,7 +22,7 @@ shotgrid:
     windows: "\\\\server\\projects\\buffalo_flow_config"
   # Name of the Project entity these deliveries land in. Either set project_id
   # directly, or leave null and pass --project-id on the command line.
-  project_id: null
+  project_id: 1343
 
 # Directory watched for new vendor deliveries / external downloads. Must
 # contain one standing subfolder per Asset Type (see ingest.asset_type_folders

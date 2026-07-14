@@ -234,6 +234,7 @@ def render_and_flag(usd_path: Path, asset: dict, project_id: int, task: dict | N
     _verify_frames_written(frame_pattern, tt_cfg["frame_start"], tt_cfg["frame_end"])
     _convert_to_acescg(frame_pattern, tt_cfg["frame_start"], tt_cfg["frame_end"], oiiotool_exe, tt_cfg)
 
+    turntable_render_type = sg_utils.find_or_create_published_file_type(sg, "Turntable Render")
     sg.create(
         "PublishedFile",
         {
@@ -243,7 +244,7 @@ def render_and_flag(usd_path: Path, asset: dict, project_id: int, task: dict | N
             "task": {"type": "Task", "id": task["id"]} if task else None,
             "version_number": version,
             "path": {"local_path": frame_pattern},
-            "published_file_type": {"type": "PublishedFileType", "name": "Turntable Render"},
+            "published_file_type": {"type": "PublishedFileType", "id": turntable_render_type["id"]},
         },
     )
 
