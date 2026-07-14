@@ -2,21 +2,22 @@
 sg_utils.py -- shared ShotGrid / Toolkit helpers for the ingest + turntable
 pipeline.
 
-Credentials are read from environment variables only, never from config.yml
-or source code, per CLAUDE_INSTRUCTIONS.md rule "No credentials or real
-paths in commits":
+Authentication: bootstrapped via `sgtk.sgtk_from_path()` against the
+Toolkit pipeline configuration itself (config.yml `shotgrid.pipeline_config_path`),
+exactly the same call BUF_Mac_watcher/scripts/qt_watcher.py's `get_sgtk()`
+already makes. This reads whatever credentials that Toolkit install's own
+core config already has set up -- no separate ShotGrid API script or
+SG_SCRIPT_NAME/SG_SCRIPT_KEY environment variables needed, and nothing
+credential-shaped stored in this repo (satisfies CLAUDE_INSTRUCTIONS.md
+rule "No credentials or real paths in commits" by having no credentials
+here at all, rather than by moving them to env vars).
 
-    SG_SERVER        ShotGrid site URL (falls back to config.yml shotgrid.site)
-    SG_SCRIPT_NAME    Name of the ShotGrid API script key
-    SG_SCRIPT_KEY     The script key's application key
-
-Set these in the environment the watcher/service runs under (e.g. a systemd
-EnvironmentFile, a Windows service's environment block, or a local .env
-loaded by your process manager) -- not in this repo.
+Call `get_sgtk(config)` once per process (watch_folder.py does this at
+startup) and thread the returned `(tk, sg)` through rather than
+re-bootstrapping per delivery.
 """
 from __future__ import annotations
 
-import os
 import platform
 import logging
 from pathlib import Path
@@ -68,37 +69,21 @@ def get_log_dir(config: dict) -> Path:
     return Path(config["logging"][f"log_dir_{plat}"])
 
 
-def connect() -> Any:
-    """Return an authenticated shotgun_api3.Shotgun connection."""
-    import shotgun_api3  # imported lazily so scripts without SG needs can skip it
-
-    config = load_config()
-    site = os.environ.get("SG_SERVER") or config["shotgrid"]["site"]
-    script_name = os.environ.get("SG_SCRIPT_NAME")
-    script_key = os.environ.get("SG_SCRIPT_KEY")
-
-    if not script_name or not script_key:
-        raise EnvironmentError(
-            "SG_SCRIPT_NAME and SG_SCRIPT_KEY must be set in the environment. "
-            "See sg_utils.py module docstring."
-        )
-    if not site or site.startswith("PLACEHOLDER"):
-        raise EnvironmentError(
-            "ShotGrid site is not configured. Set shotgrid.site in config.yml "
-            "or the SG_SERVER environment variable."
-        )
-
-    return shotgun_api3.Shotgun(site, script_name=script_name, api_key=script_key)
-
-
-def get_toolkit(project_id: int):
-    """Bootstrap an sgtk instance for the given Project, so we can resolve
-    templates.yml paths and use tk.create_filesystem_structure() rather than
-    hand-rolling path joins that could drift from templates.yml."""
+def get_sgtk(config: Optional[dict] = None):
+    """Bootstrap sgtk + a Shotgun connection from the pipeline configuration
+    itself -- same call qt_watcher.py's get_sgtk() makes
+    (`sgtk.sgtk_from_path(CONFIG_PATH)`), so it reuses whatever credentials
+    that Toolkit install already has configured. Returns (tk, sg). Call once
+    per process; both `tk` (for template resolution / folder creation) and
+    `sg` (for direct API calls) get threaded through the rest of this
+    pipeline from here rather than re-bootstrapped per delivery."""
     import sgtk
 
-    tk = sgtk.sgtk_from_entity("Project", project_id)
-    return tk
+    config = config or load_config()
+    config_path = resolve_platform_path(config["shotgrid"]["pipeline_config_path"])
+    tk = sgtk.sgtk_from_path(config_path)
+    sg = tk.shotgun
+    return tk, sg
 
 
 def find_or_create_asset(

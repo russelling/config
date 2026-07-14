@@ -133,7 +133,7 @@ def _iter_deliveries(watch_dir: Path, asset_type_folders: list[str]):
             )
 
 
-def process_once(watch_dir: Path, config: dict, seen_state: dict, sg=None) -> None:
+def process_once(watch_dir: Path, config: dict, seen_state: dict, tk, sg) -> None:
     processed_dir = watch_dir / PROCESSED_DIRNAME
     failed_dir = watch_dir / FAILED_DIRNAME
     log_dir = sg_utils.get_log_dir(config)
@@ -151,7 +151,7 @@ def process_once(watch_dir: Path, config: dict, seen_state: dict, sg=None) -> No
 
         log.info("Ingesting delivery: %s (asset_type=%s)", entry, asset_type)
         try:
-            result = ingest_delivery(entry, asset_type, config, sg=sg)
+            result = ingest_delivery(entry, asset_type, config, tk=tk, sg=sg)
             moved = _move_to(entry, processed_dir, asset_type)
             log.info(
                 "Ingest OK: Asset=%s USD=%s turntable flag=%s (delivery archived at %s)",
@@ -185,7 +185,7 @@ def main():
     for asset_type in config["ingest"]["asset_type_folders"]:
         (watch_dir / asset_type).mkdir(parents=True, exist_ok=True)
 
-    sg = sg_utils.connect()
+    tk, sg = sg_utils.get_sgtk(config)
     verify_asset_type_folders(sg, config["ingest"]["asset_type_folders"])
 
     log.info("Watching %s (poll every %ss)", watch_dir, config["watch_folder"]["poll_interval_seconds"])
@@ -193,7 +193,7 @@ def main():
 
     while True:
         try:
-            process_once(watch_dir, config, seen_state, sg=sg)
+            process_once(watch_dir, config, seen_state, tk, sg)
         except Exception:
             log.exception("Unexpected error in watch loop -- continuing")
         time.sleep(config["watch_folder"]["poll_interval_seconds"])

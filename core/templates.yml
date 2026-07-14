@@ -122,6 +122,7 @@ keys:
         type: str
         shotgun_entity_type: Task
         shotgun_field_name: content
+
     # Original filename (no extension) of a vendor/external delivery, preserved
     # so the raw source is traceable back to what the vendor sent.
     original_basename:
@@ -136,6 +137,7 @@ keys:
             abc: Alembic
             gltf: glTF (JSON)
             glb: glTF (binary)
+	    max: 3ds Max
             usd: USD
             usdc: USD (binary)
             usda: USD (ASCII)

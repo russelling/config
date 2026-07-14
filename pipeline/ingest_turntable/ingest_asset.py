@@ -153,21 +153,26 @@ def parse_delivery(path: Path, folder_asset_type: str, config: dict) -> Delivery
     raise IngestError(f"{path} does not exist")
 
 
-def ingest_delivery(path: Path, asset_type: str, config: dict, sg=None, tk_factory=sg_utils.get_toolkit) -> dict:
+def ingest_delivery(path: Path, asset_type: str, config: dict, tk=None, sg=None) -> dict:
     """Full pipeline for one delivery: parse -> create/find Asset -> create
     folders -> copy source -> convert to USD -> publish -> render turntable
     frames and hand off to qt_watcher. `asset_type` comes from the standing
     incoming/<Type>/ folder the delivery was found in. Returns a summary
     dict. Raises IngestError / subprocess errors on failure -- caller
     (watch_folder.py) is responsible for routing the delivery to _failed/
-    and logging."""
+    and logging.
+
+    `tk`/`sg` are normally passed in already-bootstrapped from
+    watch_folder.py's single startup call to sg_utils.get_sgtk() -- pass
+    neither (both None) to have this call bootstrap its own for a one-off
+    run (see _cli() below)."""
     info = parse_delivery(path, asset_type, config)
     project_id = config["shotgrid"]["project_id"]
     if project_id is None:
         raise IngestError("shotgrid.project_id is not set in config.yml")
 
-    sg = sg or sg_utils.connect()
-    tk = tk_factory(project_id)
+    if tk is None or sg is None:
+        tk, sg = sg_utils.get_sgtk(config)
 
     asset = sg_utils.find_or_create_asset(sg, project_id, info.asset_name, info.asset_type)
     asset["project"] = {"type": "Project", "id": project_id}
@@ -211,7 +216,10 @@ def ingest_delivery(path: Path, asset_type: str, config: dict, sg=None, tk_facto
     usd_dest = Path(tk.templates["asset_usd_publish_file"].apply_fields(usd_fields))
 
     blender_exe = sg_utils.get_executable(config, "blender")
-    convert_to_usd.convert_to_usd(source_dest, usd_dest, blender_exe)
+    convert_to_usd.convert_to_usd(
+        source_dest, usd_dest, blender_exe,
+        max_import_config=config["ingest"].get("max_import"),
+    )
 
     sg.create(
         "PublishedFile",
@@ -237,6 +245,7 @@ def ingest_delivery(path: Path, asset_type: str, config: dict, sg=None, tk_facto
         artist=artist,
         config=config,
         tk=tk,
+        sg=sg,
     )
 
     return {

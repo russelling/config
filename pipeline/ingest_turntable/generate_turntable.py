@@ -212,15 +212,16 @@ def _write_flag(
     return flag_path
 
 
-def render_and_flag(usd_path: Path, asset: dict, project_id: int, task: dict | None, artist: str, config: dict, tk) -> Path:
+def render_and_flag(usd_path: Path, asset: dict, project_id: int, task: dict | None, artist: str, config: dict, tk, sg) -> Path:
     """Full turntable pipeline up to the qt_watcher handoff: render EXR
     frames, color-convert to ACEScg, register a PublishedFile for the raw
     render, and write the render-complete flag. Returns the flag path.
     Does NOT create a ShotGrid Version or encode a movie -- qt_watcher does
-    that asynchronously once it polls and finds the flag."""
+    that asynchronously once it polls and finds the flag. `tk`/`sg` are the
+    pair from sg_utils.get_sgtk(), passed through from ingest_asset.py
+    rather than re-bootstrapped here."""
     import sg_utils
 
-    sg = sg_utils.connect()
     version = sg_utils.next_version_number(sg, asset, "Turntable Render")
     fields = _render_fields(asset, version)
 
