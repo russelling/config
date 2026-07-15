@@ -105,9 +105,6 @@ def _render_frames(usd_path: Path, frame_pattern: str, blender_exe: str, tt_cfg:
         "--res-y", str(tt_cfg["resolution"][1]),
         "--engine", tt_cfg["render_engine"],
     ]
-    hdri_path = tt_cfg.get("hdri_path")
-    if hdri_path:
-        cmd += ["--hdri", str(hdri_path)]
     log.info("Rendering turntable frames: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -274,8 +271,7 @@ def _parse_blender_args():
     parser.add_argument("--turns", type=int, default=1)
     parser.add_argument("--res-x", type=int, required=True)
     parser.add_argument("--res-y", type=int, required=True)
-    parser.add_argument("--engine", default="BLENDER_EEVEE")
-    parser.add_argument("--hdri", default=None)
+    parser.add_argument("--engine", default="EEVEE_NEXT")
     return parser.parse_args(argv)
 
 
@@ -305,7 +301,6 @@ def _do_render_in_blender(args):
         turns=args.turns,
         resolution=(args.res_x, args.res_y),
         render_engine=args.engine,
-        hdri_path=args.hdri,
     )
 
     scene = bpy.context.scene

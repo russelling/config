@@ -167,36 +167,20 @@ def _swept_volume_coords(asset_root_obj, samples: int = 16):
     return coords
 
 
-def _setup_hdri_world(hdri_path: str, backdrop_color=(0.03, 0.03, 0.03, 1.0)):
-    """HDRI environment that lights the asset (and shows in the chrome
-    ball's reflection) WITHOUT being visible behind the asset: a Light Path
-    "Is Camera Ray" mix sends camera rays to a flat dark backdrop while all
-    lighting/reflection lookups still see the HDRI. Is Camera Ray is the
-    one Light Path output EEVEE reliably supports."""
+def _setup_hdri_world(hdri_path: str):
+    """Replace scene lighting with an HDRI environment. The environment
+    texture lights the asset and is what the chrome ball reflects."""
     world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
     bpy.context.scene.world = world
     world.use_nodes = True
     nt = world.node_tree
     nt.nodes.clear()
-
     out_node = nt.nodes.new("ShaderNodeOutputWorld")
-    mix_node = nt.nodes.new("ShaderNodeMixShader")
-    light_path = nt.nodes.new("ShaderNodeLightPath")
-
-    bg_hdri = nt.nodes.new("ShaderNodeBackground")
+    bg_node = nt.nodes.new("ShaderNodeBackground")
     env_node = nt.nodes.new("ShaderNodeTexEnvironment")
     env_node.image = bpy.data.images.load(hdri_path)
-    nt.links.new(env_node.outputs["Color"], bg_hdri.inputs["Color"])
-
-    bg_cam = nt.nodes.new("ShaderNodeBackground")
-    bg_cam.inputs["Color"].default_value = backdrop_color
-
-    # fac=0 -> first shader (HDRI, for lighting/reflections);
-    # fac=1 (camera rays) -> second shader (flat backdrop).
-    nt.links.new(light_path.outputs["Is Camera Ray"], mix_node.inputs["Fac"])
-    nt.links.new(bg_hdri.outputs["Background"], mix_node.inputs[1])
-    nt.links.new(bg_cam.outputs["Background"], mix_node.inputs[2])
-    nt.links.new(mix_node.outputs["Shader"], out_node.inputs["Surface"])
+    nt.links.new(env_node.outputs["Color"], bg_node.inputs["Color"])
+    nt.links.new(bg_node.outputs["Background"], out_node.inputs["Surface"])
 
 
 def _add_chrome_ball(cam_obj, ball_frac: float = 0.15, margin_frac: float = 0.05):
@@ -216,9 +200,7 @@ def _add_chrome_ball(cam_obj, ball_frac: float = 0.15, margin_frac: float = 0.05
     # view_frame() gives the four view corners in camera space at unit
     # depth -- scaling by dist yields exact frame extents at that distance,
     # correct for any lens/sensor-fit/aspect combination.
-    # view_frame() corner depth varies by convention -- normalize each
-    # corner to z = -1 so scaling by dist is correct regardless.
-    corners = [v / -v.z for v in cam_data.view_frame(scene=scene)]
+    corners = cam_data.view_frame(scene=scene)
     half_w = max(abs(v.x) for v in corners) * dist
     half_h = max(abs(v.y) for v in corners) * dist
 

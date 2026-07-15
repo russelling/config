@@ -167,89 +167,6 @@ def _swept_volume_coords(asset_root_obj, samples: int = 16):
     return coords
 
 
-def _setup_hdri_world(hdri_path: str, backdrop_color=(0.03, 0.03, 0.03, 1.0)):
-    """HDRI environment that lights the asset (and shows in the chrome
-    ball's reflection) WITHOUT being visible behind the asset: a Light Path
-    "Is Camera Ray" mix sends camera rays to a flat dark backdrop while all
-    lighting/reflection lookups still see the HDRI. Is Camera Ray is the
-    one Light Path output EEVEE reliably supports."""
-    world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
-    bpy.context.scene.world = world
-    world.use_nodes = True
-    nt = world.node_tree
-    nt.nodes.clear()
-
-    out_node = nt.nodes.new("ShaderNodeOutputWorld")
-    mix_node = nt.nodes.new("ShaderNodeMixShader")
-    light_path = nt.nodes.new("ShaderNodeLightPath")
-
-    bg_hdri = nt.nodes.new("ShaderNodeBackground")
-    env_node = nt.nodes.new("ShaderNodeTexEnvironment")
-    env_node.image = bpy.data.images.load(hdri_path)
-    nt.links.new(env_node.outputs["Color"], bg_hdri.inputs["Color"])
-
-    bg_cam = nt.nodes.new("ShaderNodeBackground")
-    bg_cam.inputs["Color"].default_value = backdrop_color
-
-    # fac=0 -> first shader (HDRI, for lighting/reflections);
-    # fac=1 (camera rays) -> second shader (flat backdrop).
-    nt.links.new(light_path.outputs["Is Camera Ray"], mix_node.inputs["Fac"])
-    nt.links.new(bg_hdri.outputs["Background"], mix_node.inputs[1])
-    nt.links.new(bg_cam.outputs["Background"], mix_node.inputs[2])
-    nt.links.new(mix_node.outputs["Shader"], out_node.inputs["Surface"])
-
-
-def _add_chrome_ball(cam_obj, ball_frac: float = 0.15, margin_frac: float = 0.05):
-    """Chrome reference sphere parented to the camera, pinned to the
-    lower-left of frame -- reflects the HDRI so reviewers can read the
-    lighting environment. ball_frac is the ball's diameter as a fraction
-    of frame height; margin_frac is the gap to the frame edges."""
-    import mathutils
-
-    scene = bpy.context.scene
-    cam_data = cam_obj.data
-
-    # Distance in front of the camera: a bit inside the subject distance so
-    # the ball floats between camera and asset, well past the near clip.
-    dist = max(cam_obj.location.length * 0.5, cam_data.clip_start * 20)
-
-    # view_frame() gives the four view corners in camera space at unit
-    # depth -- scaling by dist yields exact frame extents at that distance,
-    # correct for any lens/sensor-fit/aspect combination.
-    # view_frame() corner depth varies by convention -- normalize each
-    # corner to z = -1 so scaling by dist is correct regardless.
-    corners = [v / -v.z for v in cam_data.view_frame(scene=scene)]
-    half_w = max(abs(v.x) for v in corners) * dist
-    half_h = max(abs(v.y) for v in corners) * dist
-
-    radius = ball_frac * half_h
-    margin = margin_frac * 2.0 * half_h
-    local_x = -(half_w - radius - margin)
-    local_y = -(half_h - radius - margin)
-
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, segments=48, ring_count=24)
-    ball = bpy.context.active_object
-    ball.name = "TT_ChromeBall"
-    bpy.ops.object.shade_smooth()
-
-    mat = bpy.data.materials.new(name="TT_ChromeMat")
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf:
-        bsdf.inputs["Metallic"].default_value = 1.0
-        bsdf.inputs["Roughness"].default_value = 0.0
-        bsdf.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-    ball.data.materials.append(mat)
-
-    if hasattr(ball, "visible_shadow"):
-        ball.visible_shadow = False
-
-    ball.parent = cam_obj
-    ball.location = (local_x, local_y, -dist)
-    ball.rotation_euler = (0, 0, 0)
-    return ball
-
-
 def build_turntable(
     asset_root_obj,
     frame_start: int,
@@ -257,7 +174,6 @@ def build_turntable(
     turns: int,
     resolution,
     render_engine: str,
-    hdri_path: str | None = None,
 ):
     """Given the already-imported asset's root object, build the lighting /
     ground / camera rig around it and keyframe a `turns`-revolution spin
@@ -271,13 +187,8 @@ def build_turntable(
     size = _bounds_size(asset_root_obj)
 
     _add_ground(size)
-    if hdri_path:
-        _setup_hdri_world(hdri_path)
-    else:
-        _add_three_point_lighting(size)
-    cam_obj = _add_camera(asset_root_obj, size, resolution)
-    if hdri_path:
-        _add_chrome_ball(cam_obj)
+    _add_three_point_lighting(size)
+    _add_camera(asset_root_obj, size, resolution)
 
     asset_root_obj.rotation_mode = "XYZ"
     asset_root_obj.rotation_euler = (0, 0, 0)
@@ -292,13 +203,11 @@ def build_turntable(
         for kp in fcurve.keyframe_points:
             kp.interpolation = "LINEAR"
 
-    if not hdri_path:
-        # World background so unlit render regions aren't pure black.
-        # (When an HDRI is in use, _setup_hdri_world owns the world nodes.)
-        world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
-        scene.world = world
-        world.use_nodes = True
-        bg = world.node_tree.nodes.get("Background")
-        if bg:
-            bg.inputs["Color"].default_value = (0.03, 0.03, 0.03, 1.0)
-            bg.inputs["Strength"].default_value = 1.0
+    # World background so unlit render regions aren't pure black.
+    world = bpy.data.worlds.get("World") or bpy.data.worlds.new("World")
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    if bg:
+        bg.inputs["Color"].default_value = (0.03, 0.03, 0.03, 1.0)
+        bg.inputs["Strength"].default_value = 1.0

@@ -96,6 +96,7 @@ turntable:
   frame_end: 120
   fps: 24
   resolution: [1920, 1080]
+  hdri_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/color/hdri/turntable_hdri.exr
   # "BLENDER_EEVEE" (fast, default) or "CYCLES" (slower, higher fidelity)
   render_engine: BLENDER_EEVEE
   # Rendered frames are EXR, not a display-referred format: the existing
