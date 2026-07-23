@@ -106,7 +106,7 @@ All shots begin as `temp`. Once the cut is locked, selected shots are either fin
 
 | DCC | Engine | Contexts | Notes |
 |---|---|---|---|
-| Nuke 17.0 / 15.1 | `tk-nuke` | Shot steps | Primary comp tool |
+| Nuke 17.0 / 15.1 | `tk-nuke` | Shot steps | Primary comp tool. Studio CameraTracker film backs in `nuke/init.py` (Alexa 35, Nikon ZR) via Desktop `before_app_launch` → `NUKE_PATH`. |
 | Maya | `tk-maya` | Shots + Assets | Modeling, rigging, animation, FX, lighting |
 | Blender | `tk-blender` | Shots + Assets | Supplemental modeling / previz |
 | Unreal Engine | `tk-unreal` | Shots | Virtual production. Hardcoded launcher in config. |
