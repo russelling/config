@@ -1,8 +1,0 @@
-# Dynamic folder – one per Shot entity linked to the parent Scene.
-# Folder name comes from Shot.code (e.g. 010)
-# Shot must be linked to its Scene via the sg_scene field.
-type: "shotgun_entity"
-name: "code"
-entity_type: "Shot"
-filters:
-  - { "path": "sg_scene", "relation": "is", "values": [ "$scene" ] }

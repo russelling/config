@@ -1,0 +1,8 @@
+# Dynamic folder – one per Sequence entity linked to the parent Episode.
+# Folder name comes from Sequence.code (e.g. 001)
+# Sequence must be linked to its Episode via the standard episode field.
+type: "shotgun_entity"
+name: "code"
+entity_type: "Sequence"
+filters:
+  - { "path": "episode", "relation": "is", "values": [ "$episode" ] }
