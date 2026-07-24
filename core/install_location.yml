@@ -5,6 +5,6 @@
 
 Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current'
 Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current'
-Linux: ''
+Linux: '/mnt/projects/buffalo_vfx/repo/pipeline/config/flow/current'
 
 # End of file.

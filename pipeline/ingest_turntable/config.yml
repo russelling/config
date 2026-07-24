@@ -17,7 +17,7 @@ shotgrid:
   # qt_watcher.py already makes, so if qt_watcher is running on this machine,
   # this will authenticate the same way with no extra setup.
   pipeline_config_path:
-    linux: /mnt/projects/buffalo_flow_config
+    linux: /mnt/projects/buffalo_vfx/repo/pipeline/config/flow/current
     mac: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current
     windows: "\\\\server\\projects\\buffalo_flow_config"
   # Name of the Project entity these deliveries land in. Either set project_id
