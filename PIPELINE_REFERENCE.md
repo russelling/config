@@ -21,27 +21,28 @@
 
 ```
 Show (Project)
-  └─ Episode        code: 301
-       └─ Scene     code: 001  · linked to Episode via sg_episode
-            └─ Shot code: 301_001_010  · linked to Scene via sg_scene
+  └─ Episode          code: 301
+       └─ Sequence    code: 001  · linked to Episode via episode
+            └─ Shot   code: 301_001_010  · linked to Sequence via sg_sequence
                  └─ Task  · tied to Pipeline Step e.g. comp, temp
 ```
 
-The `pick_environment.py` hook checks whether `Shot.sg_scene` is populated.
-If it is → `episode_shot_step` environment loads.
+The `pick_environment.py` hook checks whether `Shot.sg_sequence` is populated
+and that Sequence has its `episode` field set.
+If so → `episode_shot_step` environment loads.
 If not → falls back to `shot_step`.
-Every shot must be linked to a Scene for the episodic config to activate.
+Every episodic shot must be linked to a Sequence whose episode is set.
 
 ---
 
 ## On-disk folder structure
 
-Full example: Episode `301`, Scene `001`, Shot `301_001_010`.
+Full example: Episode `301`, Sequence `001`, Shot `301_001_010`.
 
 ```
 shots/
   301/                         ← Episode code
-    001/                       ← Scene code
+    001/                       ← Sequence code
       301_001_010/                 ← Shot code
         plates/                  ← source plates, shared across all steps
         render/                  ← all EXR render outputs, shared
@@ -70,7 +71,7 @@ shots/
 
 Pattern: `{Shot}_{Step}_v{version}.{ext}`
 
-The Shot code (`301_001_010`) already contains the full `{Episode}_{Scene}_{shot_num}` composite, so filenames do not repeat the episode and scene separately.
+The Shot code (`301_001_010`) already contains the full `{Episode}_{Sequence}_{shot_num}` composite, so filenames do not repeat the episode and sequence separately.
 
 | Type | Example |
 |---|---|
@@ -121,8 +122,8 @@ All shots begin as `temp`. Once the cut is locked, selected shots are either fin
 |---|---|---|
 | No entity | `project.yml` | `tk-desktop.yml` |
 | Shot, no step | `project.yml` | — |
-| Shot + step, `sg_scene` populated | `episode_shot_step.yml` | `tk-nuke-episodic.yml` |
-| Shot + step, no `sg_scene` | `shot_step.yml` | `tk-nuke.yml` |
+| Shot + step, `sg_sequence` + Sequence.episode | `episode_shot_step.yml` | `tk-nuke-episodic.yml` |
+| Shot + step, no episode link | `shot_step.yml` | `tk-nuke.yml` |
 | Asset + step | `asset_step.yml` | `tk-maya.yml` |
 
 ---
@@ -131,8 +132,8 @@ All shots begin as `temp`. Once the cut is locked, selected shots are either fin
 
 | Alias | Resolves to | Used for |
 |---|---|---|
-| `shot_root` | `shots/{Episode}/{Scene}/{Shot}/{Step}` | Step-level folders: nuke/, maya/ |
-| `shot_base` | `shots/{Episode}/{Scene}/{Shot}` | Shot-level: plates/, render/, review/ |
+| `shot_root` | `shots/{Episode}/{Sequence}/{Shot}/{Step}` | Step-level folders: nuke/, maya/ |
+| `shot_base` | `shots/{Episode}/{Sequence}/{Shot}` | Shot-level: plates/, render/, review/ |
 | `asset_root` | `assets/{sg_asset_type}/{Asset}/{Step}` | All asset templates |
 
 ---
@@ -142,7 +143,7 @@ All shots begin as `temp`. Once the cut is locked, selected shots are either fin
 | Key | Type | Example | Notes |
 |---|---|---|---|
 | `Episode` | str | `301` | ShotGrid Episode.code |
-| `Scene` | str | `001` | ShotGrid Scene.code |
+| `Sequence` | str | `001` | ShotGrid Sequence.code |
 | `Shot` | str | `301_001_010` | ShotGrid Shot.code |
 | `Step` | str | `comp` | Pipeline step short code |
 | `version` | int (pad 3) | `001` | Work and publish versions |
@@ -159,8 +160,8 @@ All shots begin as `temp`. Once the cut is locked, selected shots are either fin
 | Entity | Pattern | Examples |
 |---|---|---|
 | Episodes | Show prefix + 3-digit number | `301` `302` `303` |
-| Scenes | 2-letter prefix + 3-digit number | `001` `002` `003` |
-| Shots | Episode code + `_` + shot number (×10) | `301_001_010` `301_020` |
+| Sequences | 3-digit number | `001` `002` `003` |
+| Shots | Episode code + `_` + sequence + `_` + shot number (×10) | `301_001_010` `301_001_020` |
 | Assets | PascalCase | `HeroCharacter` `CityBlock_A` |
 | Asset types | Title case | `Character` `Prop` `Environment` `Vehicle` `FX` |
 

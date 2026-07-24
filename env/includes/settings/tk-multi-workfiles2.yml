@@ -16,7 +16,7 @@ includes:
 ################################################################################
 
 # Base entity browser - used at transit/project levels where no templates are needed.
-# fields: entries ensure sg_episode and sg_scene are fetched for hierarchy grouping.
+# fields: entries ensure episode and sg_sequence are fetched for hierarchy grouping.
 
 settings.tk-multi-workfiles2: &settings_tk-multi-workfiles2
   entities:

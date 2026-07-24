@@ -1,10 +1,11 @@
 # =============================================================================
 # episode_shot_step.yml
-# Loaded when Shot.sg_scene is populated (Project > Episode > Scene > Shot).
+# Loaded when Shot.sg_sequence is set and Sequence.episode is populated
+# (Project > Episode > Sequence > Shot).
 # Returned by hooks/pick_environment.py.
 # =============================================================================
 
-description: "Episodic shot-step environment (Project > Episode > Scene > Shot)."
+description: "Episodic shot-step environment (Project > Episode > Sequence > Shot)."
 
 includes:
 - ./includes/frameworks.yml

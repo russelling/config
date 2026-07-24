@@ -3,14 +3,14 @@
 pick_environment hook – routes context to the correct environment YAML.
 
 Episodic routing:
-  Shot is episodic when Shot.sg_scene is populated (linked to a Scene entity).
-  Scene links to Episode via Scene.sg_episode.
+  Shot is episodic when Shot.sg_sequence is populated and that Sequence
+  has its standard episode field linked to an Episode.
 
 Environment map:
   project           - No entity context
   shot              - Shot, no step (legacy)
-  shot_step         - Shot + step (legacy sequence)
-  episode_shot_step - Shot + step + sg_scene populated (episodic)
+  shot_step         - Shot + step (legacy sequence without episode)
+  episode_shot_step - Shot + step + Sequence.episode populated (episodic)
   asset             - Asset, no step
   asset_step        - Asset + step
   sequence          - Sequence entity
@@ -47,18 +47,24 @@ class PickEnvironment(HookBaseClass):
         if et == "Sequence":
             return "sequence"
 
-        if et in ("Episode", "Scene"):
+        if et == "Episode":
             return "project"
 
         return "project"
 
     def _shot_env(self, context):
-        """Return 'episode_shot_step' when Shot.sg_scene is populated."""
+        """Return 'episode_shot_step' when Shot's Sequence has an episode link."""
         try:
             result = self.parent.shotgun.find_one(
-                "Shot", [["id", "is", context.entity["id"]]], ["sg_scene"]
+                "Shot", [["id", "is", context.entity["id"]]], ["sg_sequence"]
             )
-            if result and result.get("sg_scene"):
+            sg_sequence = result.get("sg_sequence") if result else None
+            if not sg_sequence:
+                return "shot_step"
+            sequence = self.parent.shotgun.find_one(
+                "Sequence", [["id", "is", sg_sequence["id"]]], ["episode"]
+            )
+            if sequence and sequence.get("episode"):
                 return "episode_shot_step"
         except Exception:
             pass

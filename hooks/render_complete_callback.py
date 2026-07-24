@@ -362,7 +362,7 @@ def run_render_complete(write_node):
         "entity_id": ctx.entity["id"] if ctx.entity else None,
         "shot_code": fields.get("Shot"),
         "episode": fields.get("Episode"),
-        "scene": fields.get("Scene"),
+        "sequence": fields.get("Sequence"),
         "step": fields.get("Step"),
         "version": fields.get("version"),
         "output": output_name,

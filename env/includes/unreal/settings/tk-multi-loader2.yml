@@ -20,7 +20,7 @@ settings.tk-multi-loader2.unreal:
     entity_type: Shot
     filters:
     - [project, is, '{context.project}']
-    hierarchy: [sg_episode, sg_scene, code]
+    hierarchy: [sg_sequence.episode, sg_sequence, code]
   - caption: My Tasks
     type: Query
     entity_type: Task

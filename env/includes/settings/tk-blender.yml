@@ -83,7 +83,7 @@ settings.tk-blender.shot:
   - {app_instance: tk-multi-workfiles2, name: File Open...}
   location: "@engines.tk-blender.location"
 
-# shot_step (episodic: Project > Episode > Scene > Shot > Step)
+# shot_step (episodic: Project > Episode > Sequence > Shot > Step)
 settings.tk-blender.shot_step:
   apps:
     tk-multi-about:

@@ -13,8 +13,6 @@ keys:
         type: str
     Episode:
         type: str
-    Scene:
-        type: str
     Shot:
         type: str
     Step:
@@ -148,13 +146,13 @@ paths:
     # -------------------------------------------------------------------------
     # Path aliases
     # -------------------------------------------------------------------------
-    shot_root: shots/{Episode}/{Scene}/{Shot}/{Step}
-    shot_base: shots/{Episode}/{Scene}/{Shot}
+    shot_root: shots/{Episode}/{Sequence}/{Shot}/{Step}
+    shot_base: shots/{Episode}/{Sequence}/{Shot}
     asset_root: assets/{sg_asset_type}/{Asset}
     sequence_root: sequences/{Sequence}
 
     ##########################################################################################
-    # Episodic shot templates  (shots/{Episode}/{Scene}/{Shot}/{Step})
+    # Episodic shot templates  (shots/{Episode}/{Sequence}/{Shot}/{Step})
     ##########################################################################################
 
     # ── Nuke ─────────────────────────────────────────────────────────────────
