@@ -250,7 +250,7 @@ class SceneOperation(HookClass):
         session like 2026-06-16.
         """
         try:
-            log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+            log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs"
             if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
             log_path = os.path.join(log_dir, "scene_op_debug.log")

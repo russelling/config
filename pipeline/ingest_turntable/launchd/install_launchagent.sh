@@ -7,11 +7,11 @@
 # relaunching a script that immediately crashes, burning CPU and filling
 # the error log instead of telling you what's actually wrong up front).
 
-REPO_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/config/pipeline/ingest_turntable"
+REPO_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable"
 SG_PYTHON="/Applications/Shotgun.app/Contents/Resources/Python3/bin/python3"
 PLIST_SRC="$REPO_DIR/launchd/com.buffalovfx.ingestturntable.plist"
 PLIST_DEST="$HOME/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist"
-LOG_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+LOG_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs"
 
 # ---------------------------------------------------------------------------
 # 1. Verify every binary/path the watcher references actually exists

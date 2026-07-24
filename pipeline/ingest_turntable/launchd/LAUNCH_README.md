@@ -39,8 +39,8 @@ launchctl list | grep ingestturntable
 
 Logs:
 
-- Output: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs/ingest_turntable_watcher.log`
-- Errors: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs/ingest_turntable_watcher_error.log`
+- Output: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher.log`
+- Errors: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher_error.log`
 - Per-delivery ingest errors (separate from the above -- one file per failed
   delivery, written by `watch_folder.py` itself, not launchd):
   `<watch_folder>/_ingest_logs/` (per `config.yml` `logging.log_dir_mac`,
@@ -66,7 +66,7 @@ launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
    `watcher_launch.txt`'s convention, so invoke it with `bash`, not `./`):
 
    ```bash
-   cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/config/pipeline/ingest_turntable/launchd"
+   cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable/launchd"
    bash install_launchagent.sh
    ```
 
@@ -86,7 +86,7 @@ launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
 
 ```
 /Applications/Shotgun.app/Contents/Resources/Python3/bin/python3 \
-  /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/config/pipeline/ingest_turntable/watch_folder.py
+  /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable/watch_folder.py
 ```
 
 Working directory: `.../ingest_turntable`. `PYTHONPATH` is set in the plist

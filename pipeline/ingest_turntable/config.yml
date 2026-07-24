@@ -18,7 +18,7 @@ shotgrid:
   # this will authenticate the same way with no extra setup.
   pipeline_config_path:
     linux: /mnt/projects/buffalo_flow_config
-    mac: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config
+    mac: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current
     windows: "\\\\server\\projects\\buffalo_flow_config"
   # Name of the Project entity these deliveries land in. Either set project_id
   # directly, or leave null and pass --project-id on the command line.

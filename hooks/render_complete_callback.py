@@ -438,7 +438,7 @@ def _debug_log(message):
     in the Script Editor. Safe to leave in place - cheap and self-contained.
     """
     try:
-        log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+        log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         with open(os.path.join(log_dir, "send_to_review_debug.log"), "a") as f:

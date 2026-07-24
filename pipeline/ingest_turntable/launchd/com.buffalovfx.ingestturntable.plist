@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Applications/Shotgun.app/Contents/Resources/Python3/bin/python3</string>
-        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/config/pipeline/ingest_turntable/watch_folder.py</string>
+        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable/watch_folder.py</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -18,18 +18,18 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs/ingest_turntable_watcher.log</string>
+    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs/ingest_turntable_watcher_error.log</string>
+    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher_error.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PYTHONPATH</key>
-        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/install/core/python</string>
+        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/install/core/python</string>
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/config/pipeline/ingest_turntable</string>
+    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable</string>
 </dict>
 </plist>

@@ -13,7 +13,7 @@
 | Config repo | `github.com/russelling/config` |
 | Production type | TV / Episodic |
 | Platforms | macOS · Windows · Linux |
-| Config location (Windows) | `C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\buffalo_flow_config` |
+| Config location (Windows) | `C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current` |
 
 ---
 
@@ -244,7 +244,7 @@ cp "/path/to/config/hooks/tk-framework-unrealqt/framework.py" \
 
 **If the install folder is wiped and re-cached, run this on the Mac:**
 ```bash
-cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/"
+cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/"
 curl -L -o unrealqt-py311-win.zip \
   "https://github.com/ue4plugins/tk-framework-unrealqt/releases/download/v1.3.1/v1.3.1-py3.11-win.zip"
 unzip unrealqt-py311-win.zip
