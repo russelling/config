@@ -4,7 +4,7 @@ scene_operation hook for tk-multi-workfiles2 / tk-nuke (episodic context).
 
 Auto-versioning: on 'new' and 'version_up', scans the work area for existing
 v### files and saves to the next available version.
-File naming: 301_001_010_temp_v001.nk
+File naming: 301_019_010_temp_v001.nk
 
 Color pipeline (first open only):
   Builds a working node graph with:

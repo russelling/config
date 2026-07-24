@@ -1,5 +1,5 @@
 # Dynamic folder – one per Shot entity linked to the parent Sequence.
-# Folder name comes from Shot.code (e.g. 301_001_010)
+# Folder name comes from Shot.code (e.g. 301_019_010)
 # Shot must be linked to its Sequence via the standard sg_sequence field.
 type: "shotgun_entity"
 name: "code"
