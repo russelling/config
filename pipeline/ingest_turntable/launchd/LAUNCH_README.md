@@ -44,7 +44,7 @@ Logs:
 - Per-delivery ingest errors (separate from the above -- one file per failed
   delivery, written by `watch_folder.py` itself, not launchd):
   `<watch_folder>/_ingest_logs/` (per `config.yml` `logging.log_dir_mac`,
-  currently `.../buffalo_vfx/assets/incoming/_ingest_logs/`)
+  currently `.../buffalo_vfx/_staging/assets_incoming/_ingest_logs/`)
 
 ## Stopping it
 

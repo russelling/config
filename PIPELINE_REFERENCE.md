@@ -186,7 +186,7 @@ Write nodes (full EXR renders to `render/`) must be executed **manually** by the
 |---|---|---|
 | Plate sequence | `shots/301/301_019/301_019_010/plates/301_019_010_plate.0001.exr` | `ep_shot_plates` |
 | CDL grade (.cc) | `shots/301/301_019/301_019_010/plates/301_019_010.cc` | `ep_shot_cdl` |
-| Show LUT | `color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube` | `ep_shot_show_lut` |
+| Show LUT | `shots/globals/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube` | `ep_shot_show_lut` |
 
 ---
 

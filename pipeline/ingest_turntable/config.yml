@@ -32,15 +32,13 @@ shotgrid:
 #
 # This is a PLAIN filesystem path, not a Toolkit template/root -- see
 # core/roots_additions.yml for why it deliberately does NOT need a
-# core/roots.yml entry or a ShotGrid Local Storage. mac_path below now
-# lives INSIDE buffalo_vfx/assets/ (moved there directly rather than as a
-# sibling of shots/assets/editorial) -- see the note on qt_watcher.assets_root
-# below about the one side effect of that. linux/windows are unconfirmed
-# placeholders (this appears to be a macOS-only shop today).
+# core/roots.yml entry or a ShotGrid Local Storage. mac_path below lives at
+# buffalo_vfx/_staging/assets_incoming/ (outside assets_root). linux/windows
+# are unconfirmed placeholders (this appears to be a macOS-only shop today).
 watch_folder:
-  linux_path: /mnt/projects/assets/incoming
-  mac_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/assets/incoming
-  windows_path: "\\\\server\\projects\\assets\\incoming"
+  linux_path: /mnt/projects/buffalo_vfx/_staging/assets_incoming
+  mac_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/_staging/assets_incoming
+  windows_path: "C:\\Volumes\\atv-post-lucid3\\atv-buffalo-s03\\buffalo_vfx\\_staging\\assets_incoming"
   # Seconds a file/folder's size must be unchanged before it's considered
   # "done copying" and safe to ingest.
   stability_window_seconds: 15
@@ -96,7 +94,7 @@ turntable:
   frame_end: 120
   fps: 24
   resolution: [1920, 1080]
-  hdri_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/color/hdri/turntable_hdri.exr
+  hdri_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/shots/globals/hdri/turntable_hdri.exr
   # "BLENDER_EEVEE" (fast, default) or "CYCLES" (slower, higher fidelity)
   render_engine: BLENDER_EEVEE
   # Rendered frames are EXR, not a display-referred format: the existing
@@ -154,15 +152,12 @@ qt_watcher:
   # "artist" recorded on the flag / burned into the QT. Manifest.yml can
   # override per-delivery with an `artist:` field; this is the fallback.
   default_artist: "Ingest Pipeline"
-  # NOTE: watch_folder now lives INSIDE assets_root (assets/incoming), so
-  # qt_watcher.py's os.walk(ASSETS_ROOT) will also traverse incoming/,
-  # incoming/_processed/, and incoming/_failed/ on every poll. Harmless --
-  # none of those ever contain a .render_complete_*.json -- just extra I/O
-  # qt_watcher wasn't doing before. Worth knowing if that machine's poll
-  # ever needs to get faster/cheaper later.
+  # NOTE: watch_folder now lives under _staging/assets_incoming/, outside
+  # assets_root, so qt_watcher.py's os.walk(ASSETS_ROOT) no longer traverses
+  # the ingest drop folder on every poll.
 
 logging:
-  log_dir_linux: /mnt/projects/assets/incoming/_ingest_logs
-  log_dir_mac: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/assets/incoming/_ingest_logs
-  log_dir_windows: "\\\\server\\projects\\assets\\incoming\\_ingest_logs"
+  log_dir_linux: /mnt/projects/buffalo_vfx/_staging/assets_incoming/_ingest_logs
+  log_dir_mac: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/_staging/assets_incoming/_ingest_logs
+  log_dir_windows: "C:\\Volumes\\atv-post-lucid3\\atv-buffalo-s03\\buffalo_vfx\\_staging\\assets_incoming\\_ingest_logs"
   level: INFO

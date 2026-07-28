@@ -45,7 +45,7 @@ paths:
 
     # Movie publish from Unreal (level sequence render)
     unreal.movie_publish:
-        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{ue_level_sequence}_{ue_world}.v{version}.{ue_mov_ext}'
+        definition: 'io/editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{ue_level_sequence}_{ue_world}.v{version}.{ue_mov_ext}'
 
     # Generic asset export placeholder from Unreal
     unreal.asset_publish:

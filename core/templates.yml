@@ -223,7 +223,7 @@ paths:
         definition: '@shot_base/plates/{Shot}.cc'
 
     ep_shot_show_lut:
-        definition: 'color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube'
+        definition: 'shots/globals/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube'
 
 
     ##########################################################################################
@@ -231,17 +231,17 @@ paths:
     ##########################################################################################
 
     hiero_project_work_area:
-        definition: 'editorial/work'
+        definition: 'io/editorial/work'
     hiero_project_publish_area:
-        definition: 'editorial/publish'
+        definition: 'io/editorial/publish'
 
     hiero_project_work:
-        definition: 'editorial/work/{name}_v{version}.hrox'
+        definition: 'io/editorial/work/{name}_v{version}.hrox'
     hiero_project_publish:
-        definition: 'editorial/publish/{name}_v{version}.hrox'
+        definition: 'io/editorial/publish/{name}_v{version}.hrox'
 
     hiero_project_snapshot:
-        definition: 'editorial/work/snapshots/{name}_v{version}_{timestamp}.hrox'
+        definition: 'io/editorial/work/snapshots/{name}_v{version}_{timestamp}.hrox'
 
 
     ##########################################################################################
@@ -478,7 +478,7 @@ paths:
 
     # Movie publish from Unreal (level sequence render)
     unreal_movie_publish:
-        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{name}.v{version}.mov'
+        definition: 'io/editorial/to_editorial/{YYYY}_{MM}_{DD}/unreal/{name}.v{version}.mov'
 
     # Generic asset export from Unreal
     unreal_asset_publish:
@@ -496,13 +496,13 @@ paths:
 
     # ── QT Review Pipeline ───────────────────────────────────────────────────
     editorial_to_editorial_area:
-        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}'
+        definition: 'io/editorial/to_editorial/{YYYY}_{MM}_{DD}'
 
     editorial_to_editorial_movie:
-        definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}[_{nuke.output}]_v{version}.mov'
+        definition: 'io/editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}[_{nuke.output}]_v{version}.mov'
 
     show_logo:
-        definition: 'shots/GLOBALS/logo/teardrop.png'
+        definition: 'shots/globals/logo/teardrop.png'
 
     ep_nuke_shot_render_flag:
         definition: '@shot_base/render/work/{Shot}_{Step}[_{nuke.output}]_v{version}/.render_complete_{Shot}_{Step}[_{nuke.output}]_v{version}.json'

@@ -49,7 +49,7 @@ Asset:   HeroCharacter_model_v001.ma
 2. Name Sequence.code as `{Episode}_{seq}` (e.g. `301_019`) so the folder includes the episode
 3. Link each **Shot** to its Sequence via the standard `sg_sequence` field; Shot.code = `{Sequence}_{shot}` (e.g. `301_019_010`)
 4. Set `OCIO_CAMERA_INPUT` in `hooks/scene_operation_tk-nuke.py` to your camera log space
-5. Drop show LUT into `color/luts/` and replace `SHOW_LUT_NAME` in `core/templates.yml`
+5. Drop show LUT into `shots/globals/luts/` and replace `SHOW_LUT_NAME` in `core/templates.yml`
 6. Run `tank Episode 301 create_folders` to create directory structure on disk
 
 ## Pipeline steps
