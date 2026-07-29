@@ -30,7 +30,6 @@ engines.tk-alias.location:
 # Blender's bundled Python, and tk-core >= v0.21.6 (this config has v0.23.8).
 engines.tk-blender.location:
   type: git
-  branch: master
   path: https://github.com/icentric-dev/tk-blender.git
   version: v2.0.1
 engines.tk-desktop.location:

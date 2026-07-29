@@ -2,9 +2,11 @@
 #
 # Before App Launch — prepend this config's nuke/ folder onto NUKE_PATH so
 # CameraTracker film-back presets (and any future studio Nuke startup) load
-# when launching Nuke / Nuke Studio from ShotGrid Desktop.
+# when launching Nuke / Nuke Studio from ShotGrid Desktop. Also points
+# tk-blender at the studio's shared PySide6 install.
 
 import os
+import sys
 
 import sgtk
 
@@ -12,6 +14,17 @@ HookBaseClass = sgtk.get_hook_baseclass()
 
 # Engines that boot Nuke's Python / CameraTracker film-back list
 _NUKE_ENGINES = ("tk-nuke", "tk-nukestudio")
+
+# Blender ships no Qt bindings, so tk-blender loads PySide6 from the directory
+# named by PYSIDE2_PYTHONPATH (the engine keeps the PySide2-era variable name).
+# Each platform folder holds wheels matching that platform's pinned Blender in
+# software_paths.yml -- reinstall after a Blender upgrade that changes the
+# bundled Python ABI.
+_PYSIDE_PLATFORM_DIRS = {
+    "darwin": "darwin",
+    "win32": "win64",
+    "linux": "linux",
+}
 
 
 class BeforeAppLaunch(HookBaseClass):
@@ -24,6 +37,10 @@ class BeforeAppLaunch(HookBaseClass):
         software_entity=None,
         **kwargs
     ):
+        if engine_name == "tk-blender":
+            self._setup_blender_pyside()
+            return
+
         if engine_name not in _NUKE_ENGINES:
             return
 
@@ -45,3 +62,38 @@ class BeforeAppLaunch(HookBaseClass):
 
         sgtk.util.append_path_to_env_var("NUKE_PATH", nuke_startup)
         self.logger.info("Added studio Nuke path to NUKE_PATH: %s" % nuke_startup)
+
+    def _setup_blender_pyside(self):
+        # An existing value is a deliberate per-machine override; leave it be.
+        if os.environ.get("PYSIDE2_PYTHONPATH"):
+            return
+
+        platform_dir = None
+        for prefix, name in _PYSIDE_PLATFORM_DIRS.items():
+            if sys.platform.startswith(prefix):
+                platform_dir = name
+                break
+
+        if platform_dir is None:
+            self.logger.warning(
+                "No shared PySide6 folder mapped for platform %s -- the "
+                "ShotGrid menu will not appear in Blender." % sys.platform
+            )
+            return
+
+        pyside_root = os.path.join(
+            self.sgtk.pipeline_configuration.get_path(),
+            "resources",
+            "pyside6",
+            platform_dir,
+        )
+
+        if not os.path.isdir(pyside_root):
+            self.logger.warning(
+                "Shared PySide6 install missing, so the ShotGrid menu will "
+                "not appear in Blender. Expected: %s" % pyside_root
+            )
+            return
+
+        os.environ["PYSIDE2_PYTHONPATH"] = pyside_root
+        self.logger.info("Blender will load PySide6 from: %s" % pyside_root)

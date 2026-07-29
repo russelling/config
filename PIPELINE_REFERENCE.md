@@ -197,7 +197,7 @@ Write nodes (full EXR renders to `render/`) must be executed **manually** by the
 | `tk-desktop` | v2.8.5 |
 | `tk-maya` | v0.14.0 |
 | `tk-nuke` | v0.14.1 |
-| `tk-blender` | v1.0.0 |
+| `tk-blender` | v2.0.1 (icentric-dev fork) |
 | `tk-unreal` | v1.4.4 |
 | `tk-aftereffects` | v1.5.0 |
 | `tk-multi-workfiles2` | v0.13.4 |
@@ -238,6 +238,44 @@ cp "/path/to/config/hooks/tk-framework-unrealqt/framework.py" \
    "/path/to/config/install/github/ue4plugins/tk-framework-unrealqt/v1.3.1/framework.py"
 ```
 
+### tk-blender Shotgun_menu.py — Blender 5.2 / Python 3.13 compatibility patch
+
+`install/git/tk-blender.git/v2.0.1/resources/scripts/startup/Shotgun_menu.py` has been manually patched so the engine loads under Blender 5.2 (Python 3.13). The patched source of record is committed to `hooks/tk-blender/Shotgun_menu.py`.
+
+Three separate breakages, all fatal before the ShotGrid menu could appear:
+
+1. `import imp` — the `imp` module was removed in Python 3.12. Replaced with an `importlib.util` equivalent of `imp.load_source`.
+2. `exec()` + `locals()` in `insert_main_menu()` — Python 3.13 implements PEP 667, so `exec()` writes are no longer visible through `locals()`, and the rebuilt `TOPBAR_MT_editor_menus` class came back as a `KeyError`. Now execs into an explicit namespace dict. `ast.Str` was also swapped for `ast.Constant` (removed in Python 3.14).
+3. `QtWindowEventLoop.__init__(self)` — Blender 5.x passes an argument through to `Operator.__init__`, raising `TypeError: takes 1 positional argument but 2 were given`. Signature is now `(self, *args, **kwargs)` with a `super()` call, so it works on both old and new Blender.
+
+**If `tank cache_apps` re-downloads `tk-blender`, these patches will be overwritten and must be reapplied.**
+
+To reapply:
+```bash
+cp "/path/to/config/hooks/tk-blender/Shotgun_menu.py" \
+   "/path/to/config/install/git/tk-blender.git/v2.0.1/resources/scripts/startup/Shotgun_menu.py"
+```
+
+### tk-blender PySide6 — shared studio install, not bundled
+
+Blender ships no Qt bindings, so the engine loads PySide6 from the folder named by the `PYSIDE2_PYTHONPATH` env var (the engine kept the PySide2-era name). `hooks/tk-multi-launchapp/before_app_launch.py` sets this for `tk-blender` to:
+
+```
+<pipeline_config_root>/resources/pyside6/<darwin|win64|linux>
+```
+
+This lives **outside** the config git repo — it is roughly 2 GB per platform and must not be committed. An existing `PYSIDE2_PYTHONPATH` value is respected as a per-machine override.
+
+macOS is installed (PySide6 6.8.3, verified importing inside Blender 5.2). To install for another platform, use that platform's **Blender-bundled** Python so the wheel ABI matches:
+
+```bash
+"/Applications/Blender.app/Contents/Resources/5.2/python/bin/python3.13" \
+  -m pip install "PySide6==6.8.3" \
+  --target="<pipeline_config_root>/resources/pyside6/darwin"
+```
+
+Version notes: 6.7.2 is the version the fork was validated against, but it has no Python 3.13 build, so Blender 5.2 requires 6.8+. 6.8.3 is the oldest available for 3.13. Community reports say 6.8.x was unstable on Blender 4.2 — if the UI misbehaves, PySide6 version is the first thing to bisect. Reinstall after any Blender upgrade that changes the bundled Python ABI.
+
 ### tk-framework-unrealqt vendor zip — must be manually installed
 
 `tank cache_apps` does **not** download the platform-specific PySide6 vendor zips — only the base framework code. The vendor zip must be downloaded and unpacked manually into the install folder.
@@ -263,6 +301,7 @@ UE 5.7 uses Python 3.11.8. The py3.11 Windows vendor is the correct one.
 - [ ] Unreal publish workflow — `tk-unreal` publish plugins are stubbed; full `.umap` export pipeline not yet defined
 - [ ] Premiere Pro launcher — launch-only; no `tk-premiere` engine exists
 - [ ] Maya and Blender review submission hooks not yet configured
+- [ ] Blender 5.2 — engine loads after three compatibility patches (see above); interactive ShotGrid menu, Loader, and Publish still need verification in a GUI session. `tk-blender` upstream targets Blender 4.2, so 5.2 is unsupported by the fork.
 - [ ] USD pipeline — templates exist; USD export publish plugin not yet written
 - [ ] Permissions — `process_folder_creation.py` hook has placeholder `os.chmod`; set actual permissions
 - [ ] Season support — hierarchy is Episode-only; Season entity not yet accounted for
