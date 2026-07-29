@@ -47,7 +47,7 @@ watch_folder:
 
 ingest:
   # File extensions treated as ingestible 3D asset sources.
-  accepted_extensions: [fbx, obj, abc, gltf, glb, max, usd, usdc, usda, usdz]
+  accepted_extensions: [fbx, obj, abc, gltf, glb, max, usd, usdc, usda, usdz, ply, stl]
   # 3ds Max (.max) source support -- via the "Import Autodesk MAX (.max)"
   # extension (https://extensions.blender.org/add-ons/io-scene-max/,
   # https://github.com/nrgsille76/io_scene_max). operator and filepath_arg
@@ -94,7 +94,10 @@ turntable:
   frame_end: 120
   fps: 24
   resolution: [1920, 1080]
-  hdri_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/shots/globals/hdri/turntable_hdri.exr
+  # On-disk globals live under shots/_globals/ (shots/globals/ exists but is
+  # empty). turntable_hdri.exr was never present; use an existing studio HDRI.
+  # Blender loads .hdr natively. Set to null to fall back to three-point lights.
+  hdri_path: /Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/shots/_globals/hdri/kloofendal_misty_morning_puresky_2k.hdr
   # "BLENDER_EEVEE" (fast, default) or "CYCLES" (slower, higher fidelity)
   render_engine: BLENDER_EEVEE
   # Rendered frames are EXR, not a display-referred format: the existing

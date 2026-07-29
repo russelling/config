@@ -215,6 +215,13 @@ paths:
     shot_quicktime_quick:
         definition: '@shot_base/review/{Shot}_{Step}_{iteration}.mov'
 
+    # ── Reference and delivered source media (shot level) ────────────────────
+    shot_reference_area:
+        definition: '@shot_base/reference'
+
+    shot_source_area:
+        definition: '@shot_base/source'
+
     # ── Plates, CDL, LUT (shot level) ────────────────────────────────────────
     ep_shot_plates:
         definition: '@shot_base/plates/{Shot}.####.exr'
@@ -223,7 +230,9 @@ paths:
         definition: '@shot_base/plates/{Shot}.cc'
 
     ep_shot_show_lut:
-        definition: 'shots/globals/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube'
+        # Disk truth: shots/_globals/ (shots/globals/ is empty post-migration).
+        # Current show LUT is the p1s variant under LUT/260629/s3LUT/.
+        definition: 'shots/_globals/LUT/260629/s3LUT/ARRILogC4_SEV_S3_V3_digital_p1s_R709.cube'
 
 
     ##########################################################################################
@@ -502,7 +511,8 @@ paths:
         definition: 'io/editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}[_{nuke.output}]_v{version}.mov'
 
     show_logo:
-        definition: 'shots/globals/logo/teardrop.png'
+        # Disk truth: shots/_globals/logo/ (shots/globals/logo/ is empty).
+        definition: 'shots/_globals/logo/teardrop.png'
 
     ep_nuke_shot_render_flag:
         definition: '@shot_base/render/work/{Shot}_{Step}[_{nuke.output}]_v{version}/.render_complete_{Shot}_{Step}[_{nuke.output}]_v{version}.json'

@@ -4,9 +4,14 @@ Same pattern as `BUF_Mac_watcher/QT_Watcher_README.md` -- this watcher runs
 as a **macOS LaunchAgent** (`com.buffalovfx.ingestturntable`) that executes
 `watch_folder.py` using the Shotgun/Flow desktop app's bundled Python 3.
 
+**Authoritative live code** lives under:
+`.../flow/current/config/pipeline/ingest_turntable/`
+(The copy under `flow/alts/ingest_pipeline/` is a stale scaffold with
+pre-migration `buffalo_flow_config` paths -- do not install from there.)
+
 ## Everyday launch (agent already installed)
 
-**Option A — Terminal**
+**Option A — Terminal** (on the Mac Studio as `mark.russell`)
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
@@ -37,10 +42,20 @@ chmod +x ~/Desktop/start_ingest_turntable.command
 launchctl list | grep ingestturntable
 ```
 
-Logs:
+Healthy example (PID is a number, status is 0):
+```
+12345  0  com.buffalovfx.ingestturntable
+```
+Broken (not running; last exit was an error):
+```
+-  78  com.buffalovfx.ingestturntable
+```
 
-- Output: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher.log`
-- Errors: `/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher_error.log`
+Logs (local — avoid network paths here; launchd exit 78 is common when
+StandardOut/Err point at a share):
+
+- Output: `~/Library/Logs/buffalovfx/ingest_turntable_watcher.log`
+- Errors: `~/Library/Logs/buffalovfx/ingest_turntable_watcher_error.log`
 - Per-delivery ingest errors (separate from the above -- one file per failed
   delivery, written by `watch_folder.py` itself, not launchd):
   `<watch_folder>/_ingest_logs/` (per `config.yml` `logging.log_dir_mac`,
@@ -52,7 +67,7 @@ Logs:
 launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
 ```
 
-## One-time setup (new machine, or reinstalling)
+## One-time setup (new machine, or reinstalling after a path migration)
 
 1. Confirm `pipeline/ingest_turntable/config.yml` is filled in --
    `shotgrid.pipeline_config_path`, `shotgrid.project_id`,
@@ -62,8 +77,9 @@ launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
    installer below reads some of these to sanity-check paths, so an
    unconfigured `config.yml` will show up as failed checks, not a mystery
    launchd crash loop.
-2. In Terminal, run the installer script (it has no shebang, matching
-   `watcher_launch.txt`'s convention, so invoke it with `bash`, not `./`):
+2. In Terminal **on the Mac Studio** (`mark.russell`), run the installer
+   script (it has no shebang, matching `watcher_launch.txt`'s convention,
+   so invoke it with `bash`, not `./`):
 
    ```bash
    cd "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable/launchd"
@@ -76,7 +92,7 @@ launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
    - `pip install PyYAML` into the Shotgun-bundled Python specifically (NOT
      your shell's plain `python3`/`pip3` -- see main `README.md`
      "Environment setup" for why that distinction matters on this machine)
-   - create the shared logs folder
+   - create `~/Library/Logs/buffalovfx/` for launchd stdout/stderr
    - copy `com.buffalovfx.ingestturntable.plist` into
      `~/Library/LaunchAgents/`
    - `launchctl load` it
@@ -90,8 +106,8 @@ launchctl unload ~/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist
 ```
 
 Working directory: `.../ingest_turntable`. `PYTHONPATH` is set in the plist
-to `.../buffalo_flow_config/install/core/python` so `import sgtk` resolves
--- same value `com.buffalovfx.qtwatcher.plist` uses.
+to `.../flow/current/install/core/python` so `import sgtk` resolves --
+same value `com.buffalovfx.qtwatcher.plist` uses.
 
 No credentials are set in the plist's `EnvironmentVariables` -- unlike a
 typical service, this watcher doesn't need a ShotGrid API script key at

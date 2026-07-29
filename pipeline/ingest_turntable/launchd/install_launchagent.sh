@@ -11,7 +11,8 @@ REPO_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/con
 SG_PYTHON="/Applications/Shotgun.app/Contents/Resources/Python3/bin/python3"
 PLIST_SRC="$REPO_DIR/launchd/com.buffalovfx.ingestturntable.plist"
 PLIST_DEST="$HOME/Library/LaunchAgents/com.buffalovfx.ingestturntable.plist"
-LOG_DIR="/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs"
+# Local only -- launchd often exits 78 if StandardOut/Err are on a network share.
+LOG_DIR="$HOME/Library/Logs/buffalovfx"
 
 # ---------------------------------------------------------------------------
 # 1. Verify every binary/path the watcher references actually exists
@@ -62,7 +63,7 @@ if [ "$FAIL" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Logs folder + LaunchAgent
+# 3. Local logs folder + LaunchAgent
 # ---------------------------------------------------------------------------
 mkdir -p "$LOG_DIR"
 mkdir -p "$HOME/Library/LaunchAgents"
@@ -74,4 +75,11 @@ launchctl unload "$PLIST_DEST" 2>/dev/null
 
 launchctl load "$PLIST_DEST"
 
-launchctl list | grep ingestturntable
+echo ""
+echo "launchctl status:"
+launchctl list | grep ingestturntable || echo "(not listed -- check $LOG_DIR/ingest_turntable_watcher_error.log)"
+echo ""
+echo "Healthy example:   <pid>  0  com.buffalovfx.ingestturntable"
+echo "Broken (exit 78):  -      78 com.buffalovfx.ingestturntable   <- usually network StandardOut/Err"
+echo "Logs: $LOG_DIR/ingest_turntable_watcher.log"
+echo "      $LOG_DIR/ingest_turntable_watcher_error.log"

@@ -1,6 +1,6 @@
 """
 convert_to_usd.py -- converts an incoming asset source file (FBX / OBJ /
-Alembic / glTF / 3ds Max) to pipeline-standard USD.
+Alembic / glTF / PLY / STL / 3ds Max) to pipeline-standard USD.
 
 This module has two lives:
 
@@ -16,8 +16,9 @@ This module has two lives:
    The --max-* args are only passed (and only required) when importing a
    .max file -- see "3ds Max (.max) source support" below.
 
-Supported input extensions: fbx, obj, abc, gltf, glb, max, usd/usdc/usda/usdz
-(the last group is passed through unchanged -- no conversion needed).
+Supported input extensions: fbx, obj, abc, gltf, glb, ply, stl, max,
+usd/usdc/usda/usdz (the last group is passed through unchanged -- no
+conversion needed).
 
 ## 3ds Max (.max) source support
 
@@ -62,7 +63,7 @@ except ImportError:
 
 
 PASSTHROUGH_EXTENSIONS = {"usd", "usdc", "usda", "usdz"}
-SUPPORTED_EXTENSIONS = {"fbx", "obj", "abc", "gltf", "glb", "max"} | PASSTHROUGH_EXTENSIONS
+SUPPORTED_EXTENSIONS = {"fbx", "obj", "abc", "gltf", "glb", "ply", "stl", "max"} | PASSTHROUGH_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +75,7 @@ def convert_to_usd(
     blender_exe: str,
     max_import_config: Optional[dict] = None,
 ) -> Path:
-    """Convert `source` (fbx/obj/abc/gltf/glb/max) into a USD file at
+    """Convert `source` (fbx/obj/abc/gltf/glb/ply/stl/max) into a USD file at
     `dest`, by launching Blender headless. `max_import_config` (config.yml
     ingest.max_import) is required only when `source` is a .max file --
     see module docstring "3ds Max (.max) source support". Returns `dest`.
@@ -204,6 +205,18 @@ def _import_source(bpy_module, source: Path, max_addon_module=None, max_import_o
         bpy_module.ops.wm.alembic_import(filepath=str(source))
     elif ext in ("gltf", "glb"):
         bpy_module.ops.import_scene.gltf(filepath=str(source))
+    elif ext == "ply":
+        # Blender 4.x+ prefers wm.ply_import; fall back to legacy import_mesh.ply
+        if hasattr(bpy_module.ops.wm, "ply_import"):
+            bpy_module.ops.wm.ply_import(filepath=str(source))
+        else:
+            bpy_module.ops.import_mesh.ply(filepath=str(source))
+    elif ext == "stl":
+        # Blender 4.x+ prefers wm.stl_import; fall back to legacy import_mesh.stl
+        if hasattr(bpy_module.ops.wm, "stl_import"):
+            bpy_module.ops.wm.stl_import(filepath=str(source))
+        else:
+            bpy_module.ops.import_mesh.stl(filepath=str(source))
     elif ext == "max":
         _import_max(bpy_module, source, max_addon_module, max_import_operator, max_filepath_arg)
     else:

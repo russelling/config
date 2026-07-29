@@ -87,7 +87,11 @@ def _find_source_file(folder: Path, accepted_exts: list[str], explicit_name: Opt
     if len(candidates) > 1:
         # Prefer USD > Alembic > FBX > OBJ > glTF, since that ordering loses
         # the least fidelity if a vendor bundled more than one format.
-        preference = {"usd": 0, "usdc": 0, "usda": 0, "usdz": 0, "abc": 1, "fbx": 2, "obj": 3, "gltf": 4, "glb": 4}
+        preference = {
+            "usd": 0, "usdc": 0, "usda": 0, "usdz": 0,
+            "abc": 1, "fbx": 2, "obj": 3, "gltf": 4, "glb": 4,
+            "ply": 5, "stl": 5,
+        }
         candidates.sort(key=lambda p: preference.get(p.suffix.lower().lstrip("."), 99))
         log.warning(
             "Multiple ingestible files found in %s, picking %s (found: %s)",

@@ -7,9 +7,19 @@
 
     <key>ProgramArguments</key>
     <array>
+        <!-- Unversioned python3 symlink inside Shotgun.app: survives the app's
+             bundled-Python version bumps (was python3.11, now python3.13). -->
         <string>/Applications/Shotgun.app/Contents/Resources/Python3/bin/python3</string>
         <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable/watch_folder.py</string>
     </array>
+
+    <!-- sgtk is not on the bundled Python's default path; point PYTHONPATH at
+         the Toolkit core's python dir so `import sgtk` works under launchd. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/install/core/python</string>
+    </dict>
 
     <key>RunAtLoad</key>
     <true/>
@@ -17,17 +27,14 @@
     <key>KeepAlive</key>
     <true/>
 
+    <!-- Local logs only: launchd exit 78 is common when StandardOut/Err
+         point at a network volume that is slow/unavailable at load time.
+         Same pattern as com.buffalovfx.qtwatcher.plist. -->
     <key>StandardOutPath</key>
-    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher.log</string>
+    <string>/Users/mark.russell/Library/Logs/buffalovfx/ingest_turntable_watcher.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/logs/ingest_turntable_watcher_error.log</string>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PYTHONPATH</key>
-        <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/install/core/python</string>
-    </dict>
+    <string>/Users/mark.russell/Library/Logs/buffalovfx/ingest_turntable_watcher_error.log</string>
 
     <key>WorkingDirectory</key>
     <string>/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config/pipeline/ingest_turntable</string>
