@@ -20,6 +20,30 @@ def _clear_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
+def _set_render_engine(scene, requested: str) -> str:
+    """Assign the render engine, tolerating Blender's EEVEE identifier
+    rename. 4.2 replaced legacy EEVEE with "BLENDER_EEVEE_NEXT", so a single
+    literal in config.yml cannot be valid across the versions in use here --
+    an unknown identifier raises TypeError rather than degrading. Try the
+    requested name first, then the other spelling."""
+    candidates = [requested]
+    if requested == "BLENDER_EEVEE":
+        candidates.append("BLENDER_EEVEE_NEXT")
+    elif requested == "BLENDER_EEVEE_NEXT":
+        candidates.append("BLENDER_EEVEE")
+
+    for name in candidates:
+        try:
+            scene.render.engine = name
+            return name
+        except TypeError:
+            continue
+    raise ValueError(
+        f"Render engine {requested!r} is not available in this Blender "
+        f"({bpy.app.version_string}); tried {candidates}."
+    )
+
+
 def _add_three_point_lighting(target_size: float):
     dist = target_size * 3
     energy = target_size * 400
@@ -90,6 +114,17 @@ def _add_camera(asset_root_obj, target_size: float, resolution, fill: float = 0.
         horiz = mathutils.Vector((loc.x, loc.y, 0.0)).length
         pullback = (1.0 / fill - 1.0) * horiz
         cam_obj.location = loc + back * pullback
+
+    # Near/far planes must scale with the rig. Blender's camera defaults
+    # (0.1 / 1000) assume a metres-scale scene, so an asset authored in
+    # cm/mm -- e.g. a ZBrush export ~700 units across, framed from ~2000
+    # units back -- falls entirely beyond the default far plane and renders
+    # as an empty frame, while the camera-parented chrome ball (much closer)
+    # still shows. The far plane also has to clear the ground plane, which
+    # _add_ground sizes at target_size * 10.
+    dist = cam_obj.location.length
+    cam_data.clip_start = max(dist * 1e-3, 1e-4)
+    cam_data.clip_end = (dist + target_size * 10.0) * 2.0
     return cam_obj
 
 
@@ -265,7 +300,7 @@ def build_turntable(
     scene = bpy.context.scene
     scene.frame_start = frame_start
     scene.frame_end = frame_end
-    scene.render.engine = render_engine
+    _set_render_engine(scene, render_engine)
 
     _center_children_on_origin(asset_root_obj)
     size = _bounds_size(asset_root_obj)
