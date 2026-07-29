@@ -25,10 +25,14 @@ engines.tk-alias.location:
   type: app_store
   name: tk-alias
   version: v4.4.0
+# icentric fork: PySide6 support for Blender 4.2+ (original diegogarciahuerta
+# engine is PySide2 / Blender 2.8x–2.9x only). Requires PySide6 installed into
+# Blender's bundled Python, and tk-core >= v0.21.6 (this config has v0.23.8).
 engines.tk-blender.location:
   type: git
-  path: https://github.com/diegogarciahuerta/tk-blender
-  version: v1.1.1
+  branch: master
+  path: https://github.com/icentric-dev/tk-blender.git
+  version: v2.0.1
 engines.tk-desktop.location:
   type: app_store
   name: tk-desktop

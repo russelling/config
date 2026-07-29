@@ -107,6 +107,6 @@ settings.tk-blender.shot_step:
 
 # NOTE: tk-multi-reviewsubmission and tk-multi-data-validation are wired in
 # for Maya (see tk-maya.yml) but intentionally left out here for Blender --
-# the community tk-blender engine (diegogarciahuerta/tk-blender) doesn't
-# ship hooks for either. Add them only if you're prepared to write custom
-# hooks yourself.
+# the community tk-blender engine (icentric-dev/tk-blender, forked from
+# diegogarciahuerta) doesn't ship hooks for either. Add them only if you're
+# prepared to write custom hooks yourself.
