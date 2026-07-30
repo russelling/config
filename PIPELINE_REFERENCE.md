@@ -268,12 +268,22 @@ This lives **outside** the config git repo — it is roughly 2 GB per platform a
 
 **Ordering trap:** `tk-multi-launchapp` calls `prepare_launch_for_engine()`, which does `os.environ.update(launch_info.environment)` **before** running `before_app_launch`. tk-blender's launcher defaults `PYSIDE2_PYTHONPATH` to its own `<engine>/python/ext` folder, which does not exist in the v2.0.1 bundle. So the hook cannot simply skip when the variable is already set — it would always defer to that dead default and Blender would report "Could not import PySide2 as a Python module. Shotgun menu will not be available." The hook therefore only treats an existing value as a real override when that folder actually contains a `PySide6` or `PySide2` package.
 
-macOS is installed (PySide6 6.8.3, verified importing inside Blender 5.2). To install for another platform, use that platform's **Blender-bundled** Python so the wheel ABI matches:
+macOS and Windows are both installed (PySide6 6.8.3). The pipeline config is centralized and the storage is shared across platforms (`/Volumes/...` on macOS, `C:\Volumes\...` on Windows — see `install/core/install_location.yml`), so one install per platform folder serves every workstation.
+
+Install using that platform's **Blender-bundled** Python so the wheel ABI matches:
 
 ```bash
 "/Applications/Blender.app/Contents/Resources/5.2/python/bin/python3.13" \
   -m pip install "PySide6==6.8.3" \
   --target="<pipeline_config_root>/resources/pyside6/darwin"
+```
+
+The Windows wheels were cross-installed from the Mac rather than run on Windows — PySide6 ships `cp39-abi3` wheels, so pip can fetch the `win_amd64` build directly:
+
+```bash
+python3 -m pip install "PySide6==6.8.3" \
+  --platform win_amd64 --only-binary=:all: --python-version 3.13 \
+  --target="<pipeline_config_root>/resources/pyside6/win64"
 ```
 
 Version notes: 6.7.2 is the version the fork was validated against, but it has no Python 3.13 build, so Blender 5.2 requires 6.8+. 6.8.3 is the oldest available for 3.13. Community reports say 6.8.x was unstable on Blender 4.2 — if the UI misbehaves, PySide6 version is the first thing to bisect. Reinstall after any Blender upgrade that changes the bundled Python ABI.
