@@ -264,7 +264,9 @@ Blender ships no Qt bindings, so the engine loads PySide6 from the folder named 
 <pipeline_config_root>/resources/pyside6/<darwin|win64|linux>
 ```
 
-This lives **outside** the config git repo — it is roughly 2 GB per platform and must not be committed. An existing `PYSIDE2_PYTHONPATH` value is respected as a per-machine override.
+This lives **outside** the config git repo — it is roughly 2 GB per platform and must not be committed.
+
+**Ordering trap:** `tk-multi-launchapp` calls `prepare_launch_for_engine()`, which does `os.environ.update(launch_info.environment)` **before** running `before_app_launch`. tk-blender's launcher defaults `PYSIDE2_PYTHONPATH` to its own `<engine>/python/ext` folder, which does not exist in the v2.0.1 bundle. So the hook cannot simply skip when the variable is already set — it would always defer to that dead default and Blender would report "Could not import PySide2 as a Python module. Shotgun menu will not be available." The hook therefore only treats an existing value as a real override when that folder actually contains a `PySide6` or `PySide2` package.
 
 macOS is installed (PySide6 6.8.3, verified importing inside Blender 5.2). To install for another platform, use that platform's **Blender-bundled** Python so the wheel ABI matches:
 

@@ -64,8 +64,13 @@ class BeforeAppLaunch(HookBaseClass):
         self.logger.info("Added studio Nuke path to NUKE_PATH: %s" % nuke_startup)
 
     def _setup_blender_pyside(self):
-        # An existing value is a deliberate per-machine override; leave it be.
-        if os.environ.get("PYSIDE2_PYTHONPATH"):
+        # tk-multi-launchapp applies the engine launcher's environment before
+        # running this hook, and tk-blender's launcher defaults
+        # PYSIDE2_PYTHONPATH to its own (non-existent) python/ext folder. So an
+        # existing value only counts as a real override when it actually holds
+        # Qt bindings -- otherwise we would always defer to that dead default.
+        existing = os.environ.get("PYSIDE2_PYTHONPATH")
+        if existing and self._provides_qt_bindings(existing):
             return
 
         platform_dir = None
@@ -97,3 +102,10 @@ class BeforeAppLaunch(HookBaseClass):
 
         os.environ["PYSIDE2_PYTHONPATH"] = pyside_root
         self.logger.info("Blender will load PySide6 from: %s" % pyside_root)
+
+    @staticmethod
+    def _provides_qt_bindings(path):
+        return any(
+            os.path.isdir(os.path.join(path, binding))
+            for binding in ("PySide6", "PySide2")
+        )
