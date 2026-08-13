@@ -1,2 +1,9 @@
 .DS_Store
 .DS_Store
+pipeline/ingest_turntable/.DS_Store
+pipeline/.DS_Store
+hooks/.DS_Store
+env/.DS_Store
+core/schema/.DS_Store
+core/hooks/.DS_Store
+core/.DS_Store
