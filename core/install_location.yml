@@ -3,8 +3,8 @@
 # This file reflects the paths in the primary pipeline
 # configuration defined for this project.
 
-Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\buffalo_flow_config'
-Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config'
+Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current\config'
+Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config'
 Linux: ''
 
 # End of file.
