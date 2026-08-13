@@ -13,7 +13,7 @@
 | Config repo | `github.com/russelling/config` |
 | Production type | TV / Episodic |
 | Platforms | macOS · Windows · Linux |
-| Config location (Windows) | `C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\buffalo_flow_config` |
+| Config location (Windows) | `C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current` (pipeline config root; `config/` and `install/` sit under it). Was `...\buffalo_vfx\buffalo_flow_config` before the 2026-08 relocation. |
 
 ---
 
@@ -343,3 +343,29 @@ UE 5.7 uses Python 3.11.8. The py3.11 Windows vendor is the correct one.
 
 - [ ] The `_get_write_node_app` retry is a defensive backstop, not a guarantee — if `launch_at_startup: false` doesn't fully eliminate the two-click symptom in practice, re-check `scene_op_debug.log` on the next occurrence (it will now capture the real exception) rather than re-diagnosing from scratch.
 - [ ] Multi-sequence plates folders have not been tested against a real delivery yet — verify sequence grouping (`PLATE_SEQ_RE`) against actual vendor/ingest plate naming once available.
+
+---
+
+## 2026-08-12/13 incident — ShotGrid menu missing entirely after pushing the above
+
+**Symptom:** after pushing the "New File" fix above and propagating it to the share, Nuke launched via Desktop with no ShotGrid menu/tools at all. Took several rounds of log digging to get to root cause — **none of it turned out to be caused by the `scene_operation_tk-nuke.py` / `tk-nuke-episodic.yml` changes themselves** (diffed byte-for-byte against what was pushed — identical, and neither file touches anything under `core/`). Recording the full chain here since it cost real time to unwind:
+
+1. **First symptom:** `tk-nuke.log` / Nuke startup warning: `Configuration metadata file '...\buffalo_flow_config\config\core\pipeline_configuration.yml' missing!`. Cache was cleared, and `core/pipeline_configuration.yml` was confirmed to exist — but at the *current* deploy path, not the one in that error.
+2. **`tk-desktop.log` showed a second symptom:** Desktop itself, even after successfully talking to the ShotGrid server, resolved `These non-plugin_id based pipeline configurations were found by Desktop: []` / `This pipeline configuration will be used: None`. Root cause: a **stray Pipeline Configuration entity from another project** in ShotGrid still had the old `buffalo_flow_config` path registered, and was interfering with Desktop's classic (non-plugin-id) config lookup. **Archived that entity — necessary but not sufficient.**
+3. **After archiving, Nuke still failed with the exact same missing-file path.** Root cause: `core/install_location.yml` — a file that ships *inside* the config itself (tracked in git, deployed to wherever the repo is checked out) — is a self-referential "where do I live" record that classic Toolkit reads directly off disk, independent of ShotGrid. It still hardcoded:
+   ```yaml
+   Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\buffalo_flow_config'
+   Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config'
+   ```
+   from before the config was relocated to `repo\pipeline\config\flow\current\config`. Fixed to point at the current location. `core/interpreter_Darwin.cfg` had the identical stale path baked into its `python_darwin.sh` reference and was fixed at the same time (not yet exercised - no failure seen on Mac, but same root cause, would have bitten the next Mac Studio launch).
+
+4. **Second-order bug while fixing (3):** the first corrected value for `install_location.yml` wrongly ended in `\config`, producing `...\flow\current\config\config\core\pipeline_configuration.yml` (doubled `config`). **`install_location.yml` records the pipeline configuration ROOT — the folder that contains `config/` and `install/` — not the `config/` folder itself.** Toolkit appends `config/core/...` on its own. Correct value:
+   ```yaml
+   Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current'
+   Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current'
+   ```
+   Note the contrast with `core/interpreter_Darwin.cfg`, which *is* a direct path to a file and therefore *does* include `/config/core/python_darwin.sh`. Easy to conflate the two — sanity-check by concatenating: PC root + `config/core/pipeline_configuration.yml` must equal the path registered on the ShotGrid Pipeline Configuration entity.
+
+**Takeaway for next time this config gets relocated:** a path move isn't just a ShotGrid Pipeline Configuration entity edit. Check (at minimum) `core/install_location.yml`, `core/interpreter_Darwin.cfg`/`interpreter_Windows.cfg`/`interpreter_Linux.cfg`, and grep the whole repo for the old path string — `hooks/scene_operation_tk-nuke.py` and `hooks/render_complete_callback.py` both still hardcode `.../buffalo_flow_config/logs` as their debug-log directory (non-blocking, fails silently, but worth updating for consistency next time this file is touched), and `pipeline/ingest_turntable/` (separate repo, only two files live in this one per that repo's own merge instructions) has several more references to the old path in its `config.yml` and launchd files.
+
+**Debugging process note:** the two log files that actually mattered were `tk-desktop.log` and the Nuke-side startup warning text, not `tk-nuke.log` — when the ShotGrid menu is missing entirely (vs. a specific app/hook failing), the failure is almost always upstream of the engine even starting, so check Desktop's own log and Nuke's startup console output before assuming it's an engine/hook problem.

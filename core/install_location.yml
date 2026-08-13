@@ -3,8 +3,12 @@
 # This file reflects the paths in the primary pipeline
 # configuration defined for this project.
 
-Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current\config'
-Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current/config'
+# NOTE: this is the PIPELINE CONFIGURATION ROOT - the folder that CONTAINS
+# `config/` and `install/`. Toolkit appends `config/core/...` itself, so this
+# value must NOT end in `\config` (doing so produces the doubled-path error
+# `...\flow\current\config\config\core\pipeline_configuration.yml`).
+Windows: 'C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current'
+Darwin: '/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/repo/pipeline/config/flow/current'
 Linux: ''
 
 # End of file.
