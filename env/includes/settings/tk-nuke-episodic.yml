@@ -66,7 +66,14 @@ settings.tk-nuke.episodic.shot_step:
       hook_scene_operation: "{config}/scene_operation_tk-nuke.py"
       hook_filter_work_files: default
       hook_filter_publishes: default
-      launch_at_startup: true
+      # Was `true`. Auto-opening this dialog during Nuke startup was the
+      # main trigger for the "New File" needing two clicks to build the
+      # color template - it could fire before every app instance (notably
+      # tk-nuke-writenode, registered after this app below) had finished
+      # initializing. See scene_operation_tk-nuke.py's module docstring.
+      # With this off, the artist's first "New File" click always happens
+      # after Nuke/the engine have settled.
+      launch_at_startup: false
       saveas_default_name: "{Shot}_{Step}"
       saveas_prefer_version_up: true
       show_my_tasks: true

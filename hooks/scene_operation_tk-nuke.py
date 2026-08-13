@@ -8,9 +8,14 @@ File naming: 301_001_010_temp_v001.nk
 
 Color pipeline (first open only):
   Builds a working node graph with:
-    - Read node for camera plates (raw, LogC4 input)
-    - OCIOColorSpace: LogC4 -> ACEScg
-    - Dot (labelled "ACEScg working")
+    - One raw Read node per EXR sequence found on disk in the shot's
+      plates/ folder (scanned at build time - see _scan_plate_sequences).
+      Plates are assumed to already be scene-linear ACEScg (per the
+      ingest/plates contract - see CLAUDE_INSTRUCTIONS.md), so no color
+      transform is applied to them; the largest sequence found is wired
+      in as the primary plate, any others are added alongside, unwired,
+      for the artist to hook up manually.
+    - Dot (labelled "ACEScg working") off the primary plate Read
     - Merge2 <- Read node for VFX pull placeholder (raw, ACEScg)
     - Dot (labelled "to Write")
     - Write node (EXR, raw/ACEScg, no bake)
@@ -20,17 +25,55 @@ Color pipeline (first open only):
   EXR renders are output in ACEScg linear - no color baked in.
   Review QTs are generated externally from the EXR renders.
 
+  NOTE (2026-08-13): this used to also build a single hardcoded "CAMERA
+  PLATES" Read node (from the ep_shot_plates template) feeding an
+  OCIOColorSpace LogC4->ACEScg conversion. That's gone - plates are now
+  assumed to land already-converted to ACEScg linear EXR, and the plates/
+  folder is scanned directly instead of assuming one fixed filename
+  pattern, since a shot's plates/ folder can hold more than one sequence
+  (multiple takes/passes). If that assumption ever stops being true,
+  the color-convert step needs to come back here (or upstream of it).
+
+Working-directory behavior:
+  Nuke's root 'project_directory' knob is pointed at the shot's folder
+  (shots/{Episode}/{Scene}/{Shot} - the `shot_base` template) any time a
+  script is opened, created, or saved-as for a shot context. This makes
+  Read/Write file browsers (and any relative paths) default into the
+  shot's own folders (plates/, render/, review/, reference/...) instead
+  of wherever the artist last happened to browse.
+
+First-launch reliability:
+  Historically, the color template would sometimes fail to build (or
+  silently fall back to a plain Write node instead of the TK Write node)
+  on the very first "New File" of a session, requiring a second attempt.
+  The best-understood contributor was `tk-multi-workfiles2`'s
+  `launch_at_startup: true` setting auto-opening the New/Open dialog
+  during Nuke startup - before every app instance (tk-nuke-writenode is
+  registered after tk-multi-workfiles2 in env/includes/settings/
+  tk-nuke-episodic.yml) is guaranteed to have finished initializing. That
+  setting has been switched to `false` (see that file) so the artist's
+  first real "New File" click always happens after Nuke/the engine has
+  settled. On top of that, this hook now (a) retries briefly for the
+  tk-nuke-writenode app instance instead of failing immediately, and (b)
+  wraps the whole template build in a try/except that logs a full
+  traceback to scene_op_debug.log and tells the artist in-app if it still
+  fails, instead of leaving them looking at a blank script with no
+  explanation.
+
 OCIO config: ACES 1.3
 Update OCIO_CAMERA_INPUT to match your camera:
   ARRI LogC4  : "Input - ARRI - Curve - LogC4 - EI800"
   ARRI LogC3  : "Input - ARRI - Curve - LogC3 - EI800"
   RED Log3G10 : "Input - RED - Curve - Log3G10"
   Sony SLog3  : "Input - Sony - Curve - SLog3 - SGamut3"
+  (Only relevant if a camera-log color-convert step is ever reinstated
+  above the plates Read nodes - see the NOTE above.)
 """
 
 import os
 import re
 import glob
+import time
 
 import nuke
 import sgtk
@@ -101,6 +144,12 @@ HookClass = sgtk.get_hook_baseclass()
 OCIO_CAMERA_INPUT = "Input - ARRI - Curve - LogC4 - EI800"
 OCIO_ACES_WORKING = "ACES - ACEScg"
 
+# Matches an EXR frame like "301_001_010_takeA.1001.exr" or
+# "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
+# Anything under plates/ that doesn't match this is treated as a single,
+# non-sequence frame instead of being skipped.
+PLATE_SEQ_RE = re.compile(r"^(?P<base>.+?)[._](?P<frame>\d{3,8})\.(?P<ext>exr)$", re.IGNORECASE)
+
 
 class SceneOperation(HookClass):
 
@@ -117,6 +166,7 @@ class SceneOperation(HookClass):
             nuke.scriptOpen(file_path)
             if read_only:
                 nuke.root()["lock_range"].setValue(True)
+            self._set_project_directory(context)
 
         elif operation == "save":
             nuke.scriptSave()
@@ -127,6 +177,7 @@ class SceneOperation(HookClass):
             if old != file_path:
                 if hasattr(engine, "save_context_to_script"):
                     engine.save_context_to_script()
+            self._set_project_directory(context)
 
         elif operation == "reset":
             nuke.scriptClear()
@@ -139,8 +190,9 @@ class SceneOperation(HookClass):
             nuke.scriptSaveAs(resolved, overwrite=0)
             if hasattr(engine, "save_context_to_script"):
                 engine.save_context_to_script()
+            self._set_project_directory(context)
             if self._is_first_version(context):
-                self._build_color_template(context, engine)
+                self._safe_build_color_template(context, engine)
                 nuke.scriptSave()
             return resolved
 
@@ -159,7 +211,8 @@ class SceneOperation(HookClass):
                 nuke.scriptSaveAs(resolved, overwrite=0)
                 if hasattr(engine, "save_context_to_script"):
                     engine.save_context_to_script()
-                self._build_color_template(context, engine)
+                self._set_project_directory(context)
+                self._safe_build_color_template(context, engine)
                 nuke.scriptSave()
             return True
 
@@ -169,6 +222,7 @@ class SceneOperation(HookClass):
             nuke.scriptSaveAs(resolved, overwrite=0)
             if hasattr(engine, "save_context_to_script"):
                 engine.save_context_to_script()
+            self._set_project_directory(context)
             return resolved
 
     # -------------------------------------------------------------------------
@@ -263,8 +317,141 @@ class SceneOperation(HookClass):
             pass
 
     # -------------------------------------------------------------------------
+    # Working-directory helper
+    # -------------------------------------------------------------------------
+
+    def _shot_base_dir(self, context):
+        """Resolve the shot's own folder (shots/{Episode}/{Scene}/{Shot}) via
+        the `shot_base` template. Returns None if it can't be resolved (e.g.
+        wrong context type, template missing needed fields)."""
+        tk = self.parent.sgtk
+        try:
+            fields = self._fields(context)
+            template = tk.templates["shot_base"]
+            needed = {k: fields[k] for k in template.keys if k in fields}
+            return template.apply_fields(needed)
+        except Exception as exc:
+            nuke.warning("[scene_op] Could not resolve shot_base directory: %s" % exc)
+            return None
+
+    def _set_project_directory(self, context):
+        """Point Nuke's root 'project_directory' knob at the shot's folder so
+        that Read/Write file browsers (and any relative paths) for new
+        elements default there instead of wherever was last browsed."""
+        try:
+            shot_dir = self._shot_base_dir(context)
+            if shot_dir and os.path.isdir(shot_dir):
+                nuke.root()["project_directory"].setValue(self._p(shot_dir))
+        except Exception as exc:
+            self._debug_log("Could not set project_directory: %r" % exc)
+
+    # -------------------------------------------------------------------------
+    # Plates scanning
+    # -------------------------------------------------------------------------
+
+    def _scan_plate_sequences(self, plates_dir):
+        """Scan a shot's plates/ folder on disk and group the EXRs in it into
+        sequences (or single frames where no frame number is found).
+
+        Assumes every EXR under plates/ is already scene-linear ACEScg - no
+        color transform is applied to any of them (see module docstring).
+
+        Returns a list of dicts, sorted with the largest sequence first:
+            {"nuke_path": <Read-ready path, '#'-padded frame token for
+                            sequences>,
+             "first": int, "last": int, "label": <name for the node label>,
+             "count": int}
+        """
+        if not plates_dir or not os.path.isdir(plates_dir):
+            return []
+
+        sequences = {}
+        singles = []
+        for fname in sorted(os.listdir(plates_dir)):
+            if not fname.lower().endswith(".exr"):
+                continue
+            m = PLATE_SEQ_RE.match(fname)
+            if m:
+                base = m.group("base")
+                pad = len(m.group("frame"))
+                sequences.setdefault((base, pad), []).append(int(m.group("frame")))
+            else:
+                singles.append(fname)
+
+        results = []
+        for (base, pad), frames in sequences.items():
+            frames.sort()
+            hashes = "#" * pad
+            nuke_path = os.path.join(plates_dir, "%s.%s.exr" % (base, hashes))
+            results.append({
+                "nuke_path": self._p(nuke_path),
+                "first": frames[0],
+                "last": frames[-1],
+                "label": base,
+                "count": len(frames),
+            })
+        for fname in singles:
+            results.append({
+                "nuke_path": self._p(os.path.join(plates_dir, fname)),
+                "first": 1,
+                "last": 1,
+                "label": os.path.splitext(fname)[0],
+                "count": 1,
+            })
+
+        results.sort(key=lambda r: r["count"], reverse=True)
+        return results
+
+    # -------------------------------------------------------------------------
+    # tk-nuke-writenode app lookup (with retry)
+    # -------------------------------------------------------------------------
+
+    def _get_write_node_app(self, engine, retries=6, delay=0.5):
+        """Return the tk-nuke-writenode app instance, retrying briefly if it
+        isn't registered in engine.apps yet.
+
+        This is the documented failure mode behind the old "have to click
+        New File twice" symptom: prepare_new firing before every app
+        instance has finished initializing. Disabling
+        tk-multi-workfiles2's launch_at_startup (see tk-nuke-episodic.yml)
+        removes the main trigger for that race, but this retry keeps the
+        build robust rather than falling back to a plain Write node (and
+        silently losing the Send to Review button) the instant it happens.
+        """
+        for _attempt in range(retries):
+            wn_app = engine.apps.get("tk-nuke-writenode")
+            if wn_app is not None:
+                return wn_app
+            time.sleep(delay)
+        return None
+
+    # -------------------------------------------------------------------------
     # Color template builder
     # -------------------------------------------------------------------------
+
+    def _safe_build_color_template(self, context, engine):
+        """Wrapper around _build_color_template that never leaves the artist
+        looking at a blank script with no explanation. Any exception is
+        logged (with traceback) to scene_op_debug.log and surfaced via
+        nuke.message, instead of silently aborting prepare_new/new."""
+        try:
+            self._build_color_template(context, engine)
+        except Exception as exc:
+            import traceback as _tb
+            trace = _tb.format_exc()
+            nuke.tprint("[scene_op] _build_color_template failed:\n%s" % trace)
+            self._debug_log("_build_color_template failed: %r\n%s" % (exc, trace))
+            try:
+                nuke.message(
+                    "The color-pipeline template failed to build automatically.\n\n"
+                    "Error: %s\n\n"
+                    "A blank versioned script was still saved for you - build the "
+                    "graph manually, or try File > New again. See "
+                    "scene_op_debug.log for the full traceback."
+                    % exc
+                )
+            except Exception:
+                pass
 
     def _build_color_template(self, context, engine):
         tk     = self.parent.sgtk
@@ -272,9 +459,9 @@ class SceneOperation(HookClass):
 
         shot = fields.get("Shot", "SHOT")
 
-        plate_path = self._safe_resolve(
-            tk, "ep_shot_plates", fields,
-            "PLACEHOLDER/plates/%s.####.exr" % shot)
+        shot_dir = self._shot_base_dir(context)
+        plates_dir = os.path.join(shot_dir, "plates") if shot_dir else None
+        plate_sequences = self._scan_plate_sequences(plates_dir)
 
         render_template = tk.templates.get("ep_nuke_shot_render_work")
         if render_template:
@@ -291,32 +478,68 @@ class SceneOperation(HookClass):
         # ── Layout constants ──────────────────────────────────────────────
         x0, y0  = 0, 0
         x_vfx   = 300
+        x_extra = -300
         x_main  = 0
         y_step  = 130
 
         y = y0
 
-        # ── Read: Camera plates (raw, LogC4) ──────────────────────────────
-        read_plates = nuke.createNode("Read", inpanel=False)
-        read_plates["file"].setValue(self._p(plate_path))
-        read_plates["raw"].setValue(True)
-        read_plates["colorspace"].setValue("raw")
-        read_plates["label"].setValue("CAMERA PLATES\n(raw LogC4)\n[value file]")
-        read_plates.setXYpos(x_main, y)
+        # ── Read: plate(s) found on disk in plates/ (raw, ACEScg linear) ──
+        # Every EXR in plates/ is assumed to already be scene-linear ACEScg
+        # (see module docstring) - no OCIO conversion is applied here. The
+        # largest sequence found becomes the primary plate wired into the
+        # graph; any others found are added alongside, unwired, for the
+        # artist to hook up manually.
+        if plate_sequences:
+            primary = plate_sequences[0]
+            read_plates = nuke.createNode("Read", inpanel=False)
+            read_plates["file"].setValue(primary["nuke_path"])
+            read_plates["first"].setValue(primary["first"])
+            read_plates["last"].setValue(primary["last"])
+            read_plates["origfirst"].setValue(primary["first"])
+            read_plates["origlast"].setValue(primary["last"])
+            read_plates["raw"].setValue(True)
+            read_plates["colorspace"].setValue("raw")
+            read_plates["label"].setValue(
+                "PLATE: %s\n(ACEScg linear, raw — %d-%d)"
+                % (primary["label"], primary["first"], primary["last"])
+            )
+            read_plates.setXYpos(x_main, y)
 
-        # ── OCIOColorSpace: LogC4 -> ACEScg ───────────────────────────────
-        y += y_step
-        cs_in = nuke.createNode("OCIOColorSpace", inpanel=False)
-        cs_in.setInput(0, read_plates)
-        cs_in["in_colorspace"].setValue(OCIO_CAMERA_INPUT)
-        cs_in["out_colorspace"].setValue(OCIO_ACES_WORKING)
-        cs_in["label"].setValue("LogC4 → ACEScg")
-        cs_in.setXYpos(x_main, y)
+            for i, seq in enumerate(plate_sequences[1:], start=1):
+                extra = nuke.createNode("Read", inpanel=False)
+                extra["file"].setValue(seq["nuke_path"])
+                extra["first"].setValue(seq["first"])
+                extra["last"].setValue(seq["last"])
+                extra["origfirst"].setValue(seq["first"])
+                extra["origlast"].setValue(seq["last"])
+                extra["raw"].setValue(True)
+                extra["colorspace"].setValue("raw")
+                extra["label"].setValue(
+                    "PLATE (extra): %s\n(ACEScg linear, raw — %d-%d)\nNot wired — connect manually"
+                    % (seq["label"], seq["first"], seq["last"])
+                )
+                extra.setXYpos(x_extra, y0 + (i - 1) * y_step)
+        else:
+            # No EXRs found in plates/ yet (e.g. before plates are
+            # delivered). Keep the graph structurally valid with a
+            # placeholder the artist can repoint once plates land.
+            fallback_path = self._p(
+                os.path.join(plates_dir or "PLACEHOLDER/plates", "%s.####.exr" % shot)
+            )
+            read_plates = nuke.createNode("Read", inpanel=False)
+            read_plates["file"].setValue(fallback_path)
+            read_plates["raw"].setValue(True)
+            read_plates["colorspace"].setValue("raw")
+            read_plates["label"].setValue(
+                "PLATE PLACEHOLDER\n(no EXRs found in plates/ yet — browse manually)\n[value file]"
+            )
+            read_plates.setXYpos(x_main, y)
 
         # ── Dot: ACEScg working ───────────────────────────────────────────
         y += y_step
         dot_working = nuke.createNode("Dot", inpanel=False)
-        dot_working.setInput(0, cs_in)
+        dot_working.setInput(0, read_plates)
         dot_working["label"].setValue("ACEScg working")
         dot_working.setXYpos(x_main + 34, y)
 
@@ -350,7 +573,11 @@ class SceneOperation(HookClass):
         # top of this module (via onUserCreate / onScriptLoad).
         y += y_step
         try:
-            wn_app = engine.apps["tk-nuke-writenode"]
+            wn_app = self._get_write_node_app(engine)
+            if wn_app is None:
+                raise RuntimeError(
+                    "tk-nuke-writenode app not available in engine.apps after retrying"
+                )
             # Select dot_write first so the new node connects to it
             for sel in nuke.selectedNodes():
                 sel.setSelected(False)
@@ -399,25 +626,26 @@ class SceneOperation(HookClass):
         viewer["label"].setValue("Display via OCIO viewer LUT")
         viewer.setXYpos(x_main, y)
 
+        plate_summary = (
+            "\n".join(
+                "  - %s (%d-%d)%s"
+                % (s["label"], s["first"], s["last"], "" if i == 0 else "  [not wired]")
+                for i, s in enumerate(plate_sequences)
+            )
+            if plate_sequences
+            else "  (none found in plates/ yet — placeholder Read added)"
+        )
+
         nuke.message(
             "Color pipeline loaded for %s.\n\n"
             "Working space : ACEScg\n\n"
-            "Camera Plates : %s\n"
-            "  → raw read, LogC4 converted to ACEScg on input\n\n"
+            "Plates (plates/, assumed ACEScg linear, raw — no conversion):\n%s\n\n"
             "VFX Pulls : Replace path in VFX PULL Read node\n"
             "  → raw read, already ACEScg — no conversion needed\n\n"
             "Write node : EXR in ACEScg linear — no color baked in\n"
             "  → %s\n\n"
+            "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
-            % (shot, plate_path, render_path)
+            % (shot, plate_summary, render_path)
         )
-
-
-
-
-
-
-
-
-

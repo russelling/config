@@ -321,3 +321,25 @@ UE 5.7 uses Python 3.11.8. The py3.11 Windows vendor is the correct one.
 - **`config` repo is not git-cloned on the Windows render machine.** All fixes pushed to GitHub must be pulled on the MacBook (via GitHub Desktop) and propagate to Windows via the network share. Missing this step was the root cause of multiple "fix didn't take effect" symptoms during the session.
 - **Windows Toolkit cache** at `C:\Users\{user}\AppData\Roaming\Shotgun\buffalovfx\p*.*` must be cleared after almost any engine settings or hook change, otherwise stale config persists.
 - The `BUF_Mac_watcher` repo is intentionally separate from `config` — do **not** copy its scripts into `config/scripts/` (would commit to the wrong repo). Plist points directly at the `BUF_Mac_watcher` location on the network share.
+
+---
+
+## 2026-08-13 session — "New File" reliability + plates auto-Read + project directory
+
+### Resolved
+
+- **"New File" needing two clicks.** Best-understood contributor: `tk-multi-workfiles2`'s `launch_at_startup: true` (in `env/includes/settings/tk-nuke-episodic.yml`) auto-opened the New/Open dialog during Nuke startup, before every app instance was guaranteed to be initialized — `tk-nuke-writenode` is registered after `tk-multi-workfiles2` in that same settings block, matching the `wn_app` fallback symptom from the 2026-06-16 session above. Set to `false`, so the artist's first real "New File" click always happens after Nuke/the engine have settled. `scene_operation_tk-nuke.py` also now:
+  - retries briefly (`_get_write_node_app`) for the `tk-nuke-writenode` app instance instead of failing immediately if it's ever still missing, and
+  - wraps the whole color-template build (`_safe_build_color_template`) in a try/except that logs a full traceback to `scene_op_debug.log` **and** shows `nuke.message` in-app, instead of the artist just seeing nothing happen with no explanation.
+  - If this regresses, check `scene_op_debug.log` first — it will now say why, rather than staying silent.
+
+- **Camera-plates Read node replaced with a plates/ folder scan.** The color template used to build one hardcoded "CAMERA PLATES" Read node from the `ep_shot_plates` template (`{Shot}.####.exr`) feeding an `OCIOColorSpace` LogC4→ACEScg conversion. That's gone. Plates are now assumed to already be delivered as scene-linear ACEScg linear EXR (per the ingest/plates contract), so `_build_color_template` calls `_scan_plate_sequences()` to scan the shot's actual `plates/` folder on disk, groups whatever EXRs it finds into sequences, and adds one **raw** Read node per sequence (no color transform). The largest sequence found is wired in as the primary plate; any additional sequences found are added alongside, unwired, for the artist to hook up manually. If `plates/` is empty (plates not delivered yet), a placeholder Read node is added instead so the graph stays structurally valid.
+  - `ep_shot_plates` template in `core/templates.yml` is now unused by this hook (left in place — may still be useful elsewhere / as a naming reference).
+  - **If plates ever stop arriving pre-converted to ACEScg**, the LogC4→ACEScg (or camera-appropriate) conversion step needs to come back — see the module docstring in `scene_operation_tk-nuke.py`.
+
+- **Nuke `project_directory` now forced to the shot's folder.** `_set_project_directory()` points Nuke's root `project_directory` knob at `shot_base` (`shots/{Episode}/{Scene}/{Shot}`) on `open`, `new`, `prepare_new`, `save_as`, and `version_up`, so Read/Write file browsers and relative paths default into the shot's own folders instead of wherever was last browsed.
+
+### Not yet done
+
+- [ ] The `_get_write_node_app` retry is a defensive backstop, not a guarantee — if `launch_at_startup: false` doesn't fully eliminate the two-click symptom in practice, re-check `scene_op_debug.log` on the next occurrence (it will now capture the real exception) rather than re-diagnosing from scratch.
+- [ ] Multi-sequence plates folders have not been tested against a real delivery yet — verify sequence grouping (`PLATE_SEQ_RE`) against actual vendor/ingest plate naming once available.
