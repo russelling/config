@@ -71,6 +71,16 @@ keys:
             nk: Nuke Script (.nk)
             nknc: Nuke Non-Commercial (.nknc)
         default: nk
+    # Per-shot LUT format (see ep_shot_lut). .cube is a 3D lattice and can
+    # carry a full creative look; OCIO maps .lut to either "Discreet 1D LUT"
+    # or "houdini", and the Discreet variant is 1D only. qt_bake_oiio.py
+    # prefers .cube when a shot has both.
+    lut_extension:
+        type: str
+        choices:
+            cube: Iridas / Resolve Cube LUT (.cube)
+            lut: Houdini or Discreet LUT (.lut)
+        default: cube
     maya_extension:
         type: str
         choices:
@@ -224,6 +234,20 @@ paths:
     ep_shot_cdl:
         definition: '@shot_base/plates/{Shot}.cc'
 
+    # Per-shot LUT, delivered alongside the plates and named after the plate.
+    # qt_bake_oiio.py prefers this over the global show LUT below; the show
+    # LUT is only the fallback for shots that have no LUT of their own.
+    # Either .cube or .lut is accepted; .cube wins if a shot has both.
+    # NOTE: the bake script resolves this path itself rather than reading this
+    # template (it runs outside a Toolkit context) - keep the two in step.
+    ep_shot_lut:
+        definition: '@shot_base/plates/{Shot}.{lut_extension}'
+
+    # Fallback only. WARNING: this does not match the path hardcoded in
+    # qt_bake_oiio.py's SHOW_LUT_PATH, which points at
+    # shots/_globals/LUT/260629/s3LUT/ARRILogC4_SEV_S3_V3_digital_p1s_R709.cube
+    # - different folder AND a different filename. One of the two is stale;
+    # confirm which file actually exists before relying on either.
     ep_shot_show_lut:
         definition: 'color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube'
 
