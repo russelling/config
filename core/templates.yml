@@ -528,7 +528,21 @@ paths:
         definition: 'editorial/to_editorial/{YYYY}_{MM}_{DD}/{Shot}_{Step}[_{nuke.output}]_v{version}.mov'
 
     show_logo:
-        definition: 'shots/GLOBALS/logo/teardrop.png'
+        # UNUSED BY THIS CONFIG as of 2026-08-19 -- nothing in FlowTrackingConfig
+        # resolves this template. Kept in sync with reality so it isn't
+        # misleading, but EDITING IT DOES NOT CHANGE THE SLATE.
+        #
+        # The slate logo is hardcoded in qt_bake_oiio.py (BUF_Mac_watcher) as
+        # LOGO_PATH = .../shots/_globals/logo/teardrop_blk1.png -- change it
+        # THERE. Note that script guards with os.path.exists() and silently
+        # renders an unbranded slate if the file is missing, so a bad path
+        # here fails quietly rather than loudly.
+        #
+        # Was 'shots/GLOBALS/logo/teardrop.png' -- that folder does not exist;
+        # the _globals convention (see LUT paths above) is correct.
+        # Folder contains teardrop.png, teardrop_blk.png, teardrop_blk1.png;
+        # only _blk1 is world-readable and only _blk1 is the one in use.
+        definition: 'shots/_globals/logo/teardrop_blk1.png'
 
     ep_nuke_shot_render_flag:
         definition: '@shot_base/render/work/{Shot}_{Step}[_{nuke.output}]_v{version}/.render_complete_{Shot}_{Step}[_{nuke.output}]_v{version}.json'
