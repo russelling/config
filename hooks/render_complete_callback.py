@@ -364,6 +364,11 @@ def run_render_complete(write_node):
         "episode": fields.get("Episode"),
         "scene": fields.get("Scene"),
         "step": fields.get("Step"),
+        # Parsed from the actual render path via ep_nuke_shot_render_work,
+        # which now carries {vendor_code} between {Shot} and {Step}. Falls
+        # back to the template's own "INH" default if somehow absent (e.g.
+        # a render path from before this key existed).
+        "vendor_code": fields.get("vendor_code") or "INH",
         "version": fields.get("version"),
         "output": output_name,
         "artist": getpass.getuser(),
