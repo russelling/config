@@ -238,6 +238,22 @@ paths:
         definition: '@shot_base/review/{Shot}_{vendor_code}_{Step}_{iteration}.mov'
 
     # ── Plates, CDL, LUT (shot level) ────────────────────────────────────────
+    # The plates FOLDER. Deliveries inside it are one folder per element,
+    # holding a resolution folder, holding the frames:
+    #
+    #   plates/301_001_0050_bg01_v02/4608x2592/301_001_0050_bg01_v02_1001.exr
+    #
+    # That shape is deliberately NOT templated: element naming varies by
+    # vendor (bg01 vs BG1), the _v## suffix is optional, resolution folders
+    # come and go, and non-plate folders sit in the same place. A template
+    # would describe a convention the deliveries do not keep. So the folder
+    # comes from here and hooks/plate_reads.py scans its contents - see that
+    # module's docstring.
+    ep_shot_plates_area:
+        definition: '@shot_base/plates'
+
+    # Legacy single-sequence plate path. Predates the per-element delivery
+    # layout above; matches only older shots with EXRs directly in plates/.
     ep_shot_plates:
         definition: '@shot_base/plates/{Shot}.####.exr'
 

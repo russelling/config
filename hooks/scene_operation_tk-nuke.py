@@ -148,6 +148,9 @@ OCIO_ACES_WORKING = "ACES - ACEScg"
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
 # Anything under plates/ that doesn't match this is treated as a single,
 # non-sequence frame instead of being skipped.
+# Plate scanning itself now lives in plate_reads.py, shared with the
+# "Load Shot Plates" menu command. Kept here only because older copies of
+# this hook referenced it; nothing in this file uses it any more.
 PLATE_SEQ_RE = re.compile(r"^(?P<base>.+?)[._](?P<frame>\d{3,8})\.(?P<ext>exr)$", re.IGNORECASE)
 
 
@@ -349,58 +352,51 @@ class SceneOperation(HookClass):
     # Plates scanning
     # -------------------------------------------------------------------------
 
-    def _scan_plate_sequences(self, plates_dir):
-        """Scan a shot's plates/ folder on disk and group the EXRs in it into
-        sequences (or single frames where no frame number is found).
+    def _plates_dir(self, context):
+        """The shot's plates folder, from the config's own template.
 
-        Assumes every EXR under plates/ is already scene-linear ACEScg - no
-        color transform is applied to any of them (see module docstring).
-
-        Returns a list of dicts, sorted with the largest sequence first:
-            {"nuke_path": <Read-ready path, '#'-padded frame token for
-                            sequences>,
-             "first": int, "last": int, "label": <name for the node label>,
-             "count": int}
+        Resolved through plate_reads so the menu command and this hook look
+        in exactly the same place; falls back to shot_base/plates if the
+        template lookup fails for any reason.
         """
-        if not plates_dir or not os.path.isdir(plates_dir):
+        try:
+            import plate_reads
+            resolved = plate_reads.plates_dir_for_context(self.parent.sgtk, context)
+            if resolved:
+                return resolved
+        except Exception as exc:
+            self._debug_log("plates_dir_for_context failed: %r" % exc)
+        shot_dir = self._shot_base_dir(context)
+        return os.path.join(shot_dir, "plates") if shot_dir else None
+
+    def _scan_plate_sequences(self, plates_dir, shot_code=None):
+        """Find this shot's delivered plate elements.
+
+        Delegates to plate_reads.scan_plates() so this and the "Load Shot
+        Plates" menu command can never disagree about what the plates are.
+        That module knows the real delivery layout - one folder per element,
+        holding a resolution folder, holding the frames:
+
+            plates/301_001_0050_bg01_v02/4608x2592/..._1001.exr
+
+        NOTE (2026-09-10): this used to list plates/ itself and look only at
+        EXRs sitting directly in it, which is not where deliveries land - so
+        it found nothing and every new script got the placeholder Read. Loose
+        EXRs in plates/ are still picked up, for older shots that have them.
+
+        Returns one record per element, best delivery first (highest version,
+        bg before el before ref). See plate_reads.scan_plates for the keys.
+        """
+        try:
+            import plate_reads
+        except Exception as exc:
+            self._debug_log("plate_reads unavailable: %r" % exc)
+            nuke.warning("[scene_op] Could not import plate_reads: %s" % exc)
             return []
-
-        sequences = {}
-        singles = []
-        for fname in sorted(os.listdir(plates_dir)):
-            if not fname.lower().endswith(".exr"):
-                continue
-            m = PLATE_SEQ_RE.match(fname)
-            if m:
-                base = m.group("base")
-                pad = len(m.group("frame"))
-                sequences.setdefault((base, pad), []).append(int(m.group("frame")))
-            else:
-                singles.append(fname)
-
-        results = []
-        for (base, pad), frames in sequences.items():
-            frames.sort()
-            hashes = "#" * pad
-            nuke_path = os.path.join(plates_dir, "%s.%s.exr" % (base, hashes))
-            results.append({
-                "nuke_path": self._p(nuke_path),
-                "first": frames[0],
-                "last": frames[-1],
-                "label": base,
-                "count": len(frames),
-            })
-        for fname in singles:
-            results.append({
-                "nuke_path": self._p(os.path.join(plates_dir, fname)),
-                "first": 1,
-                "last": 1,
-                "label": os.path.splitext(fname)[0],
-                "count": 1,
-            })
-
-        results.sort(key=lambda r: r["count"], reverse=True)
-        return results
+        records = plate_reads.scan_plates(plates_dir, shot_code=shot_code)
+        for record in records:
+            record["nuke_path"] = self._p(record["nuke_path"])
+        return records
 
     # -------------------------------------------------------------------------
     # tk-nuke-writenode app lookup (with retry)
@@ -459,9 +455,8 @@ class SceneOperation(HookClass):
 
         shot = fields.get("Shot", "SHOT")
 
-        shot_dir = self._shot_base_dir(context)
-        plates_dir = os.path.join(shot_dir, "plates") if shot_dir else None
-        plate_sequences = self._scan_plate_sequences(plates_dir)
+        plates_dir = self._plates_dir(context)
+        plate_sequences = self._scan_plate_sequences(plates_dir, shot_code=shot)
 
         render_template = tk.templates.get("ep_nuke_shot_render_work")
         if render_template:
@@ -484,40 +479,21 @@ class SceneOperation(HookClass):
 
         y = y0
 
-        # ── Read: plate(s) found on disk in plates/ (raw, ACEScg linear) ──
-        # Every EXR in plates/ is assumed to already be scene-linear ACEScg
-        # (see module docstring) - no OCIO conversion is applied here. The
-        # largest sequence found becomes the primary plate wired into the
-        # graph; any others found are added alongside, unwired, for the
-        # artist to hook up manually.
+        # ── Read: one per plate element delivered for this shot ───────────
+        # Built by plate_reads.make_read so these are identical to the nodes
+        # the "Load Shot Plates" menu command makes - same colorspace
+        # handling, same labels. The first element (bg, by the ordering
+        # plate_reads applies) is wired into the graph as the primary plate;
+        # the rest are placed alongside, unwired, for the artist.
         if plate_sequences:
+            import plate_reads
             primary = plate_sequences[0]
-            read_plates = nuke.createNode("Read", inpanel=False)
-            read_plates["file"].setValue(primary["nuke_path"])
-            read_plates["first"].setValue(primary["first"])
-            read_plates["last"].setValue(primary["last"])
-            read_plates["origfirst"].setValue(primary["first"])
-            read_plates["origlast"].setValue(primary["last"])
-            read_plates["raw"].setValue(True)
-            read_plates["colorspace"].setValue("raw")
-            read_plates["label"].setValue(
-                "PLATE: %s\n(ACEScg linear, raw — %d-%d)"
-                % (primary["label"], primary["first"], primary["last"])
-            )
+            read_plates = plate_reads.make_read(primary, primary=True)
             read_plates.setXYpos(x_main, y)
 
             for i, seq in enumerate(plate_sequences[1:], start=1):
-                extra = nuke.createNode("Read", inpanel=False)
-                extra["file"].setValue(seq["nuke_path"])
-                extra["first"].setValue(seq["first"])
-                extra["last"].setValue(seq["last"])
-                extra["origfirst"].setValue(seq["first"])
-                extra["origlast"].setValue(seq["last"])
-                extra["raw"].setValue(True)
-                extra["colorspace"].setValue("raw")
-                extra["label"].setValue(
-                    "PLATE (extra): %s\n(ACEScg linear, raw — %d-%d)\nNot wired — connect manually"
-                    % (seq["label"], seq["first"], seq["last"])
+                extra = plate_reads.make_read(
+                    seq, primary=False, note="Not wired — connect manually"
                 )
                 extra.setXYpos(x_extra, y0 + (i - 1) * y_step)
         else:
