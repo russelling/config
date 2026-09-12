@@ -56,14 +56,42 @@ settings.tk-multi-launchapp.mari:
   menu_name: Mari
   location: "@apps.tk-multi-launchapp.location"
 
-# blender
+# blender (mac/linux) -- single fixed path per OS, one icon.
+# NOTE: this app instance intentionally has no windows_path -- Windows is a
+# separate instance below (settings.tk-multi-launchapp.blender_windows) with
+# its own "versions" list. A single instance can't have per-platform
+# "versions": SingleConfigLauncher applies the same "versions" list to
+# whichever platform path it resolves, with no {version} token check, so if
+# this instance also carried a windows_path + versions list it would equally
+# re-register that many DUPLICATE commands against the fixed mac_path/
+# linux_path too (all pointing at the same real binary, just mislabeled by
+# version) -- splitting into two instances is what keeps Mac/Linux at one
+# real icon each.
 settings.tk-multi-launchapp.blender:
   engine: tk-blender
   icon: "{target_engine}/icon_256.png"
   linux_path: "@path.linux.blender"
   mac_path: "@path.mac.blender"
-  windows_path: "@path.windows.blender"
   menu_name: Blender
+  location: "@apps.tk-multi-launchapp.location"
+
+# blender (windows only) -- one launch icon per entry in "versions", each
+# with {version} substituted into windows_path/menu_name (see
+# software_paths.yml's comment on path.windows.blender) -- e.g. "Blender 5.2"
+# -> C:\...\Blender Foundation\Blender 5.2\blender.exe. No linux_path/mac_path
+# here on purpose: SingleConfigLauncher skips registering any command for a
+# platform whose path setting is unset (empty string), so this instance is a
+# no-op on Mac/Linux and the plain instance above is a no-op on Windows (its
+# windows_path is unset). No filesystem check happens here either -- a
+# version not actually installed on a given machine just fails to launch if
+# clicked, rather than not appearing at all. Add a line here the day a new
+# 5.x ships.
+settings.tk-multi-launchapp.blender_windows:
+  engine: tk-blender
+  icon: "{target_engine}/icon_256.png"
+  windows_path: "@path.windows.blender"
+  versions: ["5.2", "5.1", "5.0"]
+  menu_name: "Blender {version}"
   location: "@apps.tk-multi-launchapp.location"
 
 # motionbuilder

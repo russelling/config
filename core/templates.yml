@@ -47,6 +47,10 @@ keys:
         alias: output
         type: str
         filter_by: alphanumeric
+    blender.output:
+        alias: output
+        type: str
+        filter_by: alphanumeric
     afx.comp:
         alias: comp
         type: str
@@ -229,6 +233,23 @@ paths:
         definition: '@shot_base/render/work/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.{SEQ}.exr'
     ep_nuke_shot_render_pub:
         definition: '@shot_base/render/publish/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.{SEQ}.exr'
+
+    # Blender CG-element pre-renders (smoke, debris, fx passes, etc.) that get
+    # read INTO Nuke comp - not an official comp version themselves. Kept as
+    # a sibling of render/work and render/publish rather than inside either:
+    # render/work is where Nuke's own official versioned output lives, and
+    # Loader2/publish tooling treats everything under it as a comp version -
+    # mixing element pre-renders in there risks one being mistaken for the
+    # other. {blender.output} is REQUIRED (not bracketed like Nuke's
+    # [_{nuke.output}]), since every Blender element render needs a
+    # descriptive name - there's no unqualified "default" element.
+    # Precedent for a named subfolder under render/ that isn't work/publish:
+    # houdini_shot_render below already does the same thing for Houdini.
+    # No new schema folder needed for this - like Houdini's render/{name}
+    # path, it's a deeper, non-scaffolded path under the existing render/
+    # folder; disk folders get created by the render output itself.
+    ep_blender_shot_render_work:
+        definition: '@shot_base/render/elements/{Shot}_{vendor_code}_{Step}_{blender.output}_v{version}/{Shot}_{vendor_code}_{Step}_{blender.output}_v{version}.{SEQ}.exr'
 
     # ── Review / dailies (shot level) ────────────────────────────────────────
     ep_nuke_shot_render_movie:

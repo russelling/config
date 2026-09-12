@@ -32,7 +32,7 @@ settings.tk-blender.asset:
       location: "@apps.tk-multi-about.location"
     tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel"
-    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.launch_at_startup"
+    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.blender.launch_at_startup"
   menu_favourites:
   - {app_instance: tk-multi-workfiles2, name: File Open...}
   debug_logging: false
@@ -66,7 +66,7 @@ settings.tk-blender.project:
       location: "@apps.tk-multi-about.location"
     tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel"
-    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.launch_at_startup"
+    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.blender.launch_at_startup"
   menu_favourites:
   - {app_instance: tk-multi-workfiles2, name: File Open...}
   location: "@engines.tk-blender.location"
@@ -78,7 +78,7 @@ settings.tk-blender.shot:
       location: "@apps.tk-multi-about.location"
     tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
     tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel"
-    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.launch_at_startup"
+    tk-multi-workfiles2: "@settings.tk-multi-workfiles2.blender.launch_at_startup"
   menu_favourites:
   - {app_instance: tk-multi-workfiles2, name: File Open...}
   location: "@engines.tk-blender.location"

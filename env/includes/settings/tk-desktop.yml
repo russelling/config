@@ -17,6 +17,7 @@ includes:
 - ./tk-multi-launchapp.yml
 - ./tk-multi-publish2.yml
 - ./tk-multi-screeningroom.yml
+- ./tk-multi-shotgunpanel.yml
 
 ################################################################################
 
@@ -37,10 +38,12 @@ settings.tk-desktop.project:
     tk-multi-launchhiero: "@settings.tk-multi-launchapp.hiero"
     tk-multi-launchmari: "@settings.tk-multi-launchapp.mari"
     tk-multi-launchblender: "@settings.tk-multi-launchapp.blender"
+    tk-multi-launchblender-windows: "@settings.tk-multi-launchapp.blender_windows"
     tk-multi-launchmotionbuilder: "@settings.tk-multi-launchapp.motionbuilder"
     tk-multi-launchunreal: "@settings.tk-multi-launchapp.unreal"
     tk-multi-publish2: "@settings.tk-multi-publish2.standalone"
     tk-multi-screeningroom: "@settings.tk-multi-screeningroom.rv"
+    tk-multi-shotgunpanel: "@settings.tk-multi-shotgunpanel"
   groups:
   - matches:
     - "*Fla*"

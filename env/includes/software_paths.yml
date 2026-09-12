@@ -19,11 +19,19 @@ path.linux.mari: "/usr/local/Mari7.5v2/mari"
 path.windows.mari: C:\Program Files\Mari7.5v2\Bundle\bin\Mari7.5v2.exe
 
 # Blender
-# NOTE: placeholder paths -- update to match this studio's actual install
-# locations/versions per platform.
+# path.windows.blender uses a {version} token, consumed only by the
+# Windows-only settings.tk-multi-launchapp.blender_windows instance (see
+# tk-multi-launchapp.yml) so 5.x releases register as separate launch icons
+# without a config change per install -- matches the real per-version folder
+# naming Blender's Windows installer uses ("Blender 5.2", not
+# "blender 5.2.0"). mac_path/linux_path stay fixed single paths, used by the
+# separate plain settings.tk-multi-launchapp.blender instance (see that
+# file's comments for why the two are split, and why mac_path can't just
+# move to the tk-blender engine's own auto-discovery instead -- its built-in
+# templates don't cover the real macOS install location).
 path.linux.blender: "/usr/bin/blender"
 path.mac.blender: "/Applications/Blender.app/Contents/MacOS/Blender"
-path.windows.blender: C:\Program Files\Blender Foundation\Blender 5.0\blender.exe
+path.windows.blender: C:\Program Files\Blender Foundation\Blender {version}\blender.exe
 
 # Motionbuilder
 path.windows.motionbuilder: C:\Program Files\Autodesk\MotionBuilder 2027\bin\x64\motionbuilder.exe
