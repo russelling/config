@@ -11,3 +11,7 @@ env/.DS_Store
 hooks/.DS_Store
 hooks/.DS_Store
 hooks/tk-multi-launchapp/.DS_Store
+
+# ShotGrid credentials — never commit
+core/shotgun.yml
+core/shotgun.yml.save
