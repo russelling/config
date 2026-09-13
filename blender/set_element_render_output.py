@@ -4,10 +4,13 @@ bl_info = {
         "Resolves the pipeline's ep_blender_shot_render_work template from "
         "the current Toolkit context and points the scene's render output "
         "at it, so CG-element pre-renders (smoke, debris, etc.) always land "
-        "in the right place with the right name - no manually typed paths."
+        "in the right place with the right name - no manually typed paths. "
+        "Optionally enables a standard set of compositing passes (Normal, "
+        "Depth, Cryptomatte Object/Material, Diffuse/Glossy/Emission) and "
+        "writes everything to a single multi-layer EXR."
     ),
     "author": "Buffalo VFX",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "category": "Pipeline",
 }
@@ -60,6 +63,33 @@ def _next_version(folder_template, element_fields, tk):
     return highest + 1
 
 
+# Standard comp-pass set requested for CG elements feeding Nuke: Normal +
+# Depth/Z, Cryptomatte (Object/Material), and Diffuse/Glossy/Emission
+# separations (so a compositor can re-balance lighting without a re-render).
+# All of these are plain ViewLayer booleans as of Blender 4.2 (EEVEE Next
+# unified most pass availability with Cycles) - if a given engine doesn't
+# support one, setting it is a silent no-op rather than an error, so no
+# per-engine branching is needed here.
+def _enable_comp_passes(view_layer):
+    # Normal + Depth/Z
+    view_layer.use_pass_normal = True
+    view_layer.use_pass_z = True
+
+    # Cryptomatte (Object/Material) - Asset-level crypto deliberately left
+    # off; add view_layer.use_pass_cryptomatte_asset = True if Mark wants it.
+    view_layer.use_pass_cryptomatte_object = True
+    view_layer.use_pass_cryptomatte_material = True
+
+    # Diffuse / Glossy / Emission separations
+    view_layer.use_pass_diffuse_color = True
+    view_layer.use_pass_diffuse_direct = True
+    view_layer.use_pass_diffuse_indirect = True
+    view_layer.use_pass_glossy_color = True
+    view_layer.use_pass_glossy_direct = True
+    view_layer.use_pass_glossy_indirect = True
+    view_layer.use_pass_emit = True
+
+
 class FLOW_OT_set_element_render_output(bpy.types.Operator):
     """Resolve the pipeline render path for a CG element and set it as this scene's render output"""
 
@@ -70,6 +100,17 @@ class FLOW_OT_set_element_render_output(bpy.types.Operator):
     element_name: bpy.props.StringProperty(
         name="Element Name",
         description="Descriptive name for this CG element (e.g. smoke, debris) - alphanumeric only",
+    )
+
+    include_comp_passes: bpy.props.BoolProperty(
+        name="Include Compositing Passes",
+        description=(
+            "Enable Normal, Depth (Z), Cryptomatte (Object/Material), and "
+            "Diffuse/Glossy/Emission passes on the active View Layer, and "
+            "write to a single multi-layer EXR instead of a beauty-only "
+            "file. Turn off for a quick beauty-only test render."
+        ),
+        default=True,
     )
 
     def invoke(self, context, event):
@@ -146,10 +187,31 @@ class FLOW_OT_set_element_render_output(bpy.types.Operator):
 
         scene = context.scene
         scene.render.filepath = render_prefix
-        scene.render.image_settings.file_format = "OPEN_EXR"
+
+        image_settings = scene.render.image_settings
+        # Blender 4.2+ added ImageFormatSettings.media_type ('IMAGE' /
+        # 'MULTI_LAYER_IMAGE' / 'VIDEO'), which restricts which
+        # file_format enum values are legal - "OPEN_EXR" only under
+        # 'IMAGE', "OPEN_EXR_MULTILAYER" only under 'MULTI_LAYER_IMAGE'.
+        # Mismatching the two raises a TypeError (hit once already - see
+        # the project doc's bug #4). Older Blender (pre-4.2) has no
+        # media_type attribute at all, so guard with hasattr.
+        if self.include_comp_passes:
+            _enable_comp_passes(context.view_layer)
+            if hasattr(image_settings, "media_type"):
+                image_settings.media_type = "MULTI_LAYER_IMAGE"
+            image_settings.file_format = "OPEN_EXR_MULTILAYER"
+        else:
+            if hasattr(image_settings, "media_type"):
+                image_settings.media_type = "IMAGE"
+            image_settings.file_format = "OPEN_EXR"
+
         scene.render.use_file_extension = True
 
-        self.report({"INFO"}, "Render output set: {}".format(render_prefix))
+        if self.include_comp_passes:
+            self.report({"INFO"}, "Render output set (multi-layer EXR + comp passes): {}".format(render_prefix))
+        else:
+            self.report({"INFO"}, "Render output set (beauty only): {}".format(render_prefix))
         return {"FINISHED"}
 
 

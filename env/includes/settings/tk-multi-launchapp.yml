@@ -73,6 +73,12 @@ settings.tk-multi-launchapp.blender:
   linux_path: "@path.linux.blender"
   mac_path: "@path.mac.blender"
   menu_name: Blender
+  # Wires in the same before_app_launch.py hook the base/shotgun instances
+  # use, so BLENDER_SYSTEM_SCRIPTS gets pointed at the blender/ tools repo
+  # on every launch through this instance (see blender/README.md). Neither
+  # of the two blender instances had this set before 2026-09-13 -- Blender
+  # launches were the only ones NOT running this hook.
+  hook_before_app_launch: "{self}/before_app_launch.py:{config}/tk-multi-launchapp/before_app_launch.py"
   location: "@apps.tk-multi-launchapp.location"
 
 # blender (windows only) -- one launch icon per entry in "versions", each
@@ -92,6 +98,8 @@ settings.tk-multi-launchapp.blender_windows:
   windows_path: "@path.windows.blender"
   versions: ["5.2", "5.1", "5.0"]
   menu_name: "Blender {version}"
+  # See the plain blender instance above's comment on this hook.
+  hook_before_app_launch: "{self}/before_app_launch.py:{config}/tk-multi-launchapp/before_app_launch.py"
   location: "@apps.tk-multi-launchapp.location"
 
 # motionbuilder
