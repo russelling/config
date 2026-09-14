@@ -1,17 +1,20 @@
+# macOS
 .DS_Store
-.DS_Store
-pipeline/ingest_turntable/.DS_Store
-pipeline/.DS_Store
-hooks/.DS_Store
-env/.DS_Store
-core/schema/.DS_Store
-core/hooks/.DS_Store
-core/.DS_Store
-env/.DS_Store
-hooks/.DS_Store
-hooks/.DS_Store
-hooks/tk-multi-launchapp/.DS_Store
 
-# ShotGrid credentials — never commit
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# ShotGrid credentials -- never commit.
+# core/shotgun.yml held a live api_script/api_key in a PUBLIC repo until
+# 2026-09-13. The key has been rotated; keep both spellings ignored, including
+# the editor backup that leaked alongside it.
 core/shotgun.yml
 core/shotgun.yml.save
+core/shotgun.yml.*
+
+# Toolkit local state
+core/install_location.yml
+
+# Backups this cleanup script leaves behind
+.gitignore.bak.*
