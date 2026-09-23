@@ -144,21 +144,6 @@ HookClass = sgtk.get_hook_baseclass()
 OCIO_CAMERA_INPUT = "Input - ARRI - Curve - LogC4 - EI800"
 OCIO_ACES_WORKING = "ACES - ACEScg"
 
-# STUDIO_STEP_WRITE_DEFAULTS_APPLIED_2026_09_16
-# Mark's request 2026-09-16: the auto-built Write node's render preset
-# depends on the Step. "temp" renders default to 16-bit DWAA (fast,
-# lossy, fine for test renders); "comp" (and any other Step, unchanged)
-# stays on the existing 32-bit float default. Preset names must match
-# settings.tk-nuke.episodic.shot_step.apps.tk-nuke-writenode.write_nodes
-# in env/includes/settings/tk-nuke-episodic.yml -- flag a mismatch there,
-# don't rename one side to fix the other (CLAUDE_INSTRUCTIONS.md rule 7,
-# "Step codes are sacred").
-DEFAULT_WRITE_PRESET = "Primary EXR (32-bit)"
-WRITE_PRESET_BY_STEP = {
-    "temp": "Primary EXR (16-bit DWAA)",
-    "comp": "Primary EXR (32-bit)",
-}
-
 # Matches an EXR frame like "301_001_010_takeA.1001.exr" or
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
 # Anything under plates/ that doesn't match this is treated as a single,
@@ -333,72 +318,6 @@ class SceneOperation(HookClass):
         except Exception:
             # Never let logging itself break the calling code.
             pass
-
-    # -------------------------------------------------------------------------
-    # Step-based Write defaults
-    # -------------------------------------------------------------------------
-
-    def _step_code(self, context, fields=None):
-        """Return the lowercase Step short name for this context (e.g.
-        "temp", "comp"), or None if the context has no Step.
-
-        Reads context.step directly rather than the template fields dict:
-        the exact field key a given templates.yml uses for the Step short
-        name isn't guaranteed (not verified against the live
-        core/templates.yml when this was written -- see
-        CLAUDE_INSTRUCTIONS.md rule 2, "verify before writing"), whereas
-        context.step is sgtk's own Context API and is stable regardless of
-        template field naming. fields is accepted only as a secondary
-        fallback if context.step is ever unavailable.
-        """
-        try:
-            step = context.step
-            if step and step.get("name"):
-                return str(step["name"]).strip().lower()
-        except Exception as exc:
-            self._debug_log("_step_code: context.step lookup failed: %r" % exc)
-        if fields:
-            for key in ("Step", "step_name", "step"):
-                val = fields.get(key)
-                if val:
-                    return str(val).strip().lower()
-        return None
-
-    def _write_preset_for_step(self, context, fields=None):
-        """The tk-nuke-writenode preset name to use for this context's Step.
-
-        Must match a `name:` entry under settings.tk-nuke.episodic.
-        shot_step.apps.tk-nuke-writenode.write_nodes in
-        env/includes/settings/tk-nuke-episodic.yml. An unrecognised Step
-        falls back to DEFAULT_WRITE_PRESET and is logged rather than
-        guessed at silently.
-        """
-        step_code = self._step_code(context, fields)
-        if step_code is not None and step_code not in WRITE_PRESET_BY_STEP:
-            self._debug_log(
-                "_write_preset_for_step: Step %r has no entry in "
-                "WRITE_PRESET_BY_STEP, using DEFAULT_WRITE_PRESET %r"
-                % (step_code, DEFAULT_WRITE_PRESET)
-            )
-        return WRITE_PRESET_BY_STEP.get(step_code, DEFAULT_WRITE_PRESET)
-
-    def _fallback_write_knobs_for_step(self, context, fields=None):
-        """Knob values for the plain-Write fallback node (only used if
-        tk-nuke-writenode isn't available -- see _get_write_node_app) so it
-        still matches the Step-based bit-depth default the WriteTank preset
-        would have applied. Kept in sync with WRITE_PRESET_BY_STEP by hand;
-        there are only two presets in play here so a lookup table would be
-        more indirection, not less.
-        """
-        step_code = self._step_code(context, fields)
-        if step_code == "temp":
-            return {
-                "datatype": "16 bit half",
-                "compression": "DWAA",
-                "dw_compression_level": 45,
-            }
-        # comp, and any unrecognised Step, matches DEFAULT_WRITE_PRESET.
-        return {"datatype": "32 bit float"}
 
     # -------------------------------------------------------------------------
     # Working-directory helper
@@ -623,17 +542,12 @@ class SceneOperation(HookClass):
         dot_write["label"].setValue("to Write")
         dot_write.setXYpos(x_main + 34, y)
 
-        # ── Write: TK Write Node (Step-based EXR preset) ────────────
+        # ── Write: TK Write Node (Primary EXR 32-bit) ────────────────────
         # We use tk-nuke-writenode's WriteTank gizmo so the file path is
         # driven by the ep_nuke_shot_render_work template. The "Send to
         # Review" button knob is added to this node by the wiring near the
         # top of this module (via onUserCreate / onScriptLoad).
-        #
-        # STUDIO_STEP_WRITE_DEFAULTS_APPLIED_2026_09_16: preset now depends on the Step
-        # (temp -> 16-bit DWAA, comp -> 32-bit) -- see WRITE_PRESET_BY_STEP
-        # near the top of this file.
         y += y_step
-        write_preset = self._write_preset_for_step(context, fields)
         try:
             wn_app = self._get_write_node_app(engine)
             if wn_app is None:
@@ -647,14 +561,12 @@ class SceneOperation(HookClass):
             # create_new_write_node creates the node but doesn't return it.
             # Snapshot the WriteTank nodes before/after to grab the new one.
             _existing = set(nuke.allNodes("WriteTank"))
-            wn_app.create_new_write_node(write_preset)
+            wn_app.create_new_write_node("Primary EXR (32-bit)")
             _new_nodes = [n for n in nuke.allNodes("WriteTank") if n not in _existing]
             if not _new_nodes:
                 raise RuntimeError("create_new_write_node returned no new WriteTank node")
             write = _new_nodes[0]
-            write["label"].setValue(
-                "EXR OUTPUT\n(ACEScg linear — no bake)\n[%s]" % write_preset
-            )
+            write["label"].setValue("EXR OUTPUT\n(ACEScg linear — no bake)\n[render template-driven]")
             write.setXYpos(x_main, y)
         except Exception as _wn_exc:
             # Fallback: if tk-nuke-writenode isn't loaded for some reason,
@@ -680,19 +592,7 @@ class SceneOperation(HookClass):
             write["file_type"].setValue("exr")
             write["raw"].setValue(True)
             write["colorspace"].setValue("raw")
-            for _fb_knob, _fb_value in self._fallback_write_knobs_for_step(
-                context, fields
-            ).items():
-                try:
-                    write[_fb_knob].setValue(_fb_value)
-                except Exception as _fb_exc:
-                    self._debug_log(
-                        "Fallback Write: could not set %s = %r: %r"
-                        % (_fb_knob, _fb_value, _fb_exc)
-                    )
-            write["label"].setValue(
-                "EXR OUTPUT (FALLBACK)\n(ACEScg linear — no bake)\n[%s]" % write_preset
-            )
+            write["label"].setValue("EXR OUTPUT (FALLBACK)\n(ACEScg linear — no bake)")
             write.setXYpos(x_main, y)
 
         # ── Viewer ────────────────────────────────────────────────────────
@@ -719,10 +619,9 @@ class SceneOperation(HookClass):
             "VFX Pulls : Replace path in VFX PULL Read node\n"
             "  → raw read, already ACEScg — no conversion needed\n\n"
             "Write node : EXR in ACEScg linear — no color baked in\n"
-            "  → %s\n"
-            "  → preset: %s (Step-based default)\n\n"
+            "  → %s\n\n"
             "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
-            % (shot, plate_summary, render_path, write_preset)
+            % (shot, plate_summary, render_path)
         )

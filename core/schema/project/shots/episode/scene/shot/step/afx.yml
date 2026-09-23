@@ -1,1 +1,7 @@
 type: "static"
+
+# Created on demand, not up front: this folder appears the first time
+# tk-aftereffects is launched into (or changes context to) this Step, rather
+# than for every Step on every entity. See tk-core
+# folder_types/base.py _should_item_be_processed for the accepted values.
+defer_creation: tk-aftereffects

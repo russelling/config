@@ -1,0 +1,112 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+context_change.py
+
+Toolkit core hook, run before and after every context change.
+
+WHY THIS EXISTS
+---------------
+core/hooks/engine_init.py registers two config-level Nuke commands that are
+not apps: "Load Shot Plates" (hooks/plate_reads.py) and the Dailies Viewer
+commands (hooks/dailies_viewer.py). engine_init runs ONCE, when the engine
+starts. That is not enough, because (verified in tk-core v0.23.8
+platform/engine.py and tk-nuke v0.16.3 engine.py):
+
+  1. Nuke launched from Desktop starts in the PROJECT context; opening a shot
+     script through Workfiles2 then calls engine.change_context().
+  2. change_context() -> __load_apps() does `self.__commands = dict()` and only
+     repopulates commands that belong to APPS. Commands registered from a core
+     hook have no app, so they are silently dropped.
+  3. engine_init is NOT re-run after a context change.
+  4. tk-nuke's post_context_change() rebuilds the menu from the now-shorter
+     command list -- and it does so BEFORE this core hook's
+     post_context_change fires.
+
+So both commands vanished from the menu the moment a shot was opened, even
+though the log said they were registered. This hook puts them back and
+rebuilds the menu once more.
+
+Anything that fails here is logged and swallowed, like engine_init: a missing
+menu command is an inconvenience, a context switch that raises is not.
+"""
+
+import importlib.util
+import os
+import sys
+
+from tank import get_hook_baseclass
+
+HookBaseClass = get_hook_baseclass()
+
+# (module file in hooks/, module name) -- same pair engine_init.py loads.
+_COMMAND_MODULES = (
+    ("plate_reads.py", "plate_reads"),
+    ("dailies_viewer.py", "dailies_viewer"),
+)
+
+
+class ContextChange(HookBaseClass):
+
+    def pre_context_change(self, current_context, next_context):
+        pass
+
+    def post_context_change(self, previous_context, current_context):
+        # previous_context is None on engine START-UP; engine_init handles that.
+        if previous_context is None:
+            return
+        try:
+            import sgtk
+            engine = sgtk.platform.current_engine()
+        except Exception:
+            return
+        if engine is None or getattr(engine, "name", None) != "tk-nuke":
+            return
+
+        config_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+
+        registered_any = False
+        for filename, module_name in _COMMAND_MODULES:
+            try:
+                path = os.path.join(config_root, "hooks", filename)
+                if not os.path.exists(path):
+                    self._log(engine, "warning",
+                              "context_change: %s not found at %s" % (filename, path))
+                    continue
+                before = set(engine.commands)
+                spec = importlib.util.spec_from_file_location(module_name, path)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                module.register(engine)
+                added = set(engine.commands) - before
+                registered_any = registered_any or bool(added)
+                self._log(engine, "info",
+                          "context_change: re-registered %s after context "
+                          "change: %s" % (module_name, sorted(added) or "(none new)"))
+            except Exception as exc:
+                self._log(engine, "error",
+                          "context_change: failed to re-register %s: %s"
+                          % (module_name, exc))
+
+        # tk-nuke already rebuilt its menu before this hook ran, without these
+        # commands. Rebuild once more, respecting the same conditions tk-nuke
+        # itself checks (no UI in batch; Nuke Studio env pre-loading turns
+        # rebuilds off temporarily).
+        if not registered_any:
+            return
+        try:
+            if (getattr(engine, "has_ui", False)
+                    and getattr(engine, "_context_change_menu_rebuild", True)
+                    and getattr(engine, "menu_generator", None) is not None):
+                engine.menu_generator.create_menu()
+        except Exception as exc:
+            self._log(engine, "error",
+                      "context_change: menu rebuild failed: %s" % exc)
+
+    @staticmethod
+    def _log(engine, level, message):
+        try:
+            getattr(engine.logger, level)(message)
+        except Exception:
+            pass

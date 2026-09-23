@@ -41,31 +41,6 @@ class EngineInit(HookBaseClass):
     def execute(self, engine, **kwargs):
         if getattr(engine, "name", None) != "tk-nuke":
             return
-        # DAILIES_VIEWER_REGISTERED_2026_09_17
-        # Dailies-match Viewer Input Process (hooks/dailies_viewer.py).
-        # Independent of the plate_reads block below: no early return here.
-        try:
-            dv_root = os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))))
-            dv_path = os.path.join(dv_root, "hooks", "dailies_viewer.py")
-            if not os.path.exists(dv_path):
-                self._log(engine, "warning",
-                          "dailies_viewer: not found at %s - dailies viewer "
-                          "commands not registered." % dv_path)
-            else:
-                spec = importlib.util.spec_from_file_location(
-                    "dailies_viewer", dv_path
-                )
-                dailies_viewer = importlib.util.module_from_spec(spec)
-                sys.modules["dailies_viewer"] = dailies_viewer
-                spec.loader.exec_module(dailies_viewer)
-                dailies_viewer.register(engine)
-                self._log(engine, "info",
-                          "dailies_viewer: registered dailies viewer commands.")
-        except Exception as exc:
-            self._log(engine, "error",
-                      "dailies_viewer: failed to register commands: %s" % exc)
-
         try:
             config_root = os.path.dirname(          # <config>/
                 os.path.dirname(                    # <config>/core/

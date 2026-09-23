@@ -18,3 +18,7 @@ core/install_location.yml
 
 # Backups this cleanup script leaves behind
 .gitignore.bak.*
+
+# Tombstones the SMB mount leaves when a delete of an open file is attempted.
+# One of these (.smbdeleteAAA50002650b) was committed to this repo by accident.
+.smbdelete*

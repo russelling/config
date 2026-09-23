@@ -15,8 +15,16 @@
 # manual "Install from File" step. Distinct from BLENDER_USER_SCRIPTS,
 # which the tk-blender engine itself already sets for its own bundled
 # resources -- the two don't collide.
+#
+# Blender, second thing: set PYSIDE2_PYTHONPATH to the per-user folder
+# buf_blender_setup.py installs PySide6 into, so artists no longer run
+# setx / launchctl setenv by hand. (The variable really is named "2" --
+# tk-blender v2.0.1 is a PySide6 fork that never renamed it.) See
+# BLENDER_SETUP.md, and _setup_blender_pyside() below for why this hook
+# gets the last word over the engine's own default.
 
 import os
+import sys
 
 import sgtk
 
@@ -24,6 +32,13 @@ HookBaseClass = sgtk.get_hook_baseclass()
 
 _NUKE_ENGINES = ("tk-nuke", "tk-nukestudio")
 _BLENDER_ENGINES = ("tk-blender",)
+
+# Where buf_blender_setup.py installs PySide6. Per-user and never inside
+# Blender's own install tree: that needs admin rights, is wiped by every
+# Blender update, and fails outright (WinError 5) on the managed Windows VMs.
+# Keep these two in step with target_dir() in buf_blender_setup.py.
+_PYSIDE_PARENT = "BuffaloVFX"
+_PYSIDE_DIRNAME = "blender_pyside6"
 
 
 class BeforeAppLaunch(HookBaseClass):
@@ -99,3 +114,85 @@ class BeforeAppLaunch(HookBaseClass):
             )
         else:
             self.logger.warning("Blender tools repo missing: %s" % blender_tools)
+
+        self._setup_blender_pyside()
+
+    def _pyside_dir(self):
+        """
+        The studio's per-user PySide6 folder for this platform.
+
+        Mirrors target_dir() in buf_blender_setup.py. If you change one,
+        change the other -- they are the two ends of the same convention.
+        """
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA") or os.path.join(
+                os.path.expanduser("~"), "AppData", "Local"
+            )
+        elif sys.platform == "darwin":
+            base = os.path.join(
+                os.path.expanduser("~"), "Library", "Application Support"
+            )
+        else:
+            base = os.environ.get("XDG_DATA_HOME") or os.path.join(
+                os.path.expanduser("~"), ".local", "share"
+            )
+        return os.path.join(base, _PYSIDE_PARENT, _PYSIDE_DIRNAME)
+
+    @staticmethod
+    def _holds_pyside(path):
+        return bool(path) and os.path.isdir(os.path.join(path, "PySide6"))
+
+    def _setup_blender_pyside(self):
+        """
+        Point PYSIDE2_PYTHONPATH at a folder that actually contains PySide6.
+
+        tk-blender draws its entire UI with Qt and Blender ships no Qt
+        bindings, so without this the engine's startup script aborts on
+        import and Blender opens looking completely stock -- no dialog, no
+        menu, the reason only in the system console.
+
+        ORDERING -- why this hook gets the last word (verified in
+        tk-multi-launchapp v0.14.2 base_launcher.py):
+
+            prepare_launch_for_engine()   -> os.environ.update(required_env)
+            execute_hook("hook_before_app_launch")   <- we are here
+            execute_hook("hook_app_launch")
+
+        and tk-blender v2.0.1's prepare_launch() only fills the variable in
+        when it is unset, pointing it at its own <engine>/python/ext (which
+        is not present in the checkout on the share). So by now the variable
+        is always set, and never usefully.
+
+        That makes "is it set?" a useless question, so the decision is made
+        on CONTENT instead -- an artist's real setx/launchctl value still
+        wins, the engine's empty placeholder does not, and a machine with no
+        PySide6 anywhere gets a warning rather than a silent stock Blender.
+        """
+        studio = self._pyside_dir()
+        current = os.environ.get("PYSIDE2_PYTHONPATH")
+
+        if self._holds_pyside(current):
+            self.logger.info(
+                "PYSIDE2_PYTHONPATH already resolves to a real PySide6: %s"
+                % current
+            )
+            return
+
+        if self._holds_pyside(studio):
+            if current:
+                self.logger.info(
+                    "PYSIDE2_PYTHONPATH was %s, which holds no PySide6; using "
+                    "the studio folder instead: %s" % (current, studio)
+                )
+            else:
+                self.logger.info("Set PYSIDE2_PYTHONPATH: %s" % studio)
+            os.environ["PYSIDE2_PYTHONPATH"] = studio
+            return
+
+        self.logger.warning(
+            "No PySide6 found for Blender on this machine -- looked in %s%s. "
+            "Blender will launch WITHOUT the Flow menu. Fix: run "
+            "buf_blender_setup.py from Blender's Scripting workspace (see "
+            "BLENDER_SETUP.md). Leaving PYSIDE2_PYTHONPATH untouched."
+            % (studio, (" and %s" % current) if current else "")
+        )
