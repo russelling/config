@@ -41,24 +41,6 @@ class EngineInit(HookBaseClass):
     def execute(self, engine, **kwargs):
         if getattr(engine, "name", None) != "tk-nuke":
             return
-        # STUDIO_SHOT_WORKDIR_2026_09_26: a Nuke launched straight into a
-        # shot gets its cwd + file-browser favourites too
-        # (hooks/shot_workdir.py). Independent of the blocks below.
-        try:
-            wd_root = os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))))
-            wd_path = os.path.join(wd_root, "hooks", "shot_workdir.py")
-            if os.path.exists(wd_path):
-                spec = importlib.util.spec_from_file_location(
-                    "shot_workdir", wd_path
-                )
-                shot_workdir = importlib.util.module_from_spec(spec)
-                sys.modules["shot_workdir"] = shot_workdir
-                spec.loader.exec_module(shot_workdir)
-                self._log(engine, "info", "shot_workdir: %s" % shot_workdir.apply(
-                    engine.sgtk, engine.context, set_script_knob=False))
-        except Exception as exc:
-            self._log(engine, "error", "shot_workdir: failed: %s" % exc)
         # DAILIES_VIEWER_REGISTERED_2026_09_17
         # Dailies-match Viewer Input Process (hooks/dailies_viewer.py).
         # Independent of the plate_reads block below: no early return here.

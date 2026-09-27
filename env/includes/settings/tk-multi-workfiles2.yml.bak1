@@ -234,64 +234,10 @@ settings.tk-multi-workfiles2.blender.shot_step:
 
 ################################################################################
 
-# ---- Nuke Workfiles2 for the NON-step environments (project / sequence /
-# asset / shot). Copies of the two shared blocks above plus the config's
-# scene_operation hook. Added 2026-09-26: Workfiles2's "New File" runs the
-# scene_operation hook of the environment Nuke is CURRENTLY in, before it
-# changes context. Nuke starts in the project env, so without this the
-# stock hook ran and the first New File came up blank.
-settings.tk-multi-workfiles2.nuke:
-  hook_scene_operation: "{config}/scene_operation_tk-nuke.py"
-  entities:
-  - caption: Shots
-    entity_type: Shot
-    filters:
-    hierarchy: [code]
-    sub_hierarchy:
-      entity_type: Task
-      filters:
-      link_field: entity
-      hierarchy: [step]
-  - caption: Assets
-    entity_type: Asset
-    hierarchy: [sg_asset_type, code]
-    filters:
-    sub_hierarchy:
-      entity_type: Task
-      filters:
-      link_field: entity
-      hierarchy: [step]
-  location: "@apps.tk-multi-workfiles2.location"
-
-settings.tk-multi-workfiles2.nuke.launch_at_startup:
-  hook_scene_operation: "{config}/scene_operation_tk-nuke.py"
-  launch_at_startup: true
-  entities:
-  - caption: Shots
-    entity_type: Shot
-    filters:
-    hierarchy: [code]
-    sub_hierarchy:
-      entity_type: Task
-      filters:
-      link_field: entity
-      hierarchy: [step]
-  - caption: Assets
-    entity_type: Asset
-    hierarchy: [sg_asset_type, code]
-    filters:
-    sub_hierarchy:
-      entity_type: Task
-      filters:
-      link_field: entity
-      hierarchy: [step]
-  location: "@apps.tk-multi-workfiles2.location"
-
 # ---- Nuke
 
 # asset context (no step - simplified asset pipeline)
 settings.tk-multi-workfiles2.nuke.asset:
-  hook_scene_operation: "{config}/scene_operation_tk-nuke.py"
   template_publish: nuke_asset_publish
   template_publish_area: asset_publish_area
   template_work: nuke_asset_work

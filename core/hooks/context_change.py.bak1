@@ -62,12 +62,6 @@ class ContextChange(HookBaseClass):
         if engine is None or getattr(engine, "name", None) != "tk-nuke":
             return
 
-        # STUDIO_SHOT_WORKDIR_2026_09_26: cwd + file-browser favourites follow
-        # the shot on every context change (hooks/shot_workdir.py). The
-        # project_directory knob is left to the scene_operation hook so a
-        # context change never marks a script modified.
-        self._apply_shot_workdir(engine, current_context)
-
         config_root = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
 
@@ -109,26 +103,6 @@ class ContextChange(HookBaseClass):
         except Exception as exc:
             self._log(engine, "error",
                       "context_change: menu rebuild failed: %s" % exc)
-
-    def _apply_shot_workdir(self, engine, context):
-        try:
-            config_root = os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))))
-            path = os.path.join(config_root, "hooks", "shot_workdir.py")
-            if not os.path.exists(path):
-                self._log(engine, "warning",
-                          "context_change: shot_workdir.py not found at %s" % path)
-                return
-            spec = importlib.util.spec_from_file_location("shot_workdir", path)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["shot_workdir"] = module
-            spec.loader.exec_module(module)
-            result = module.apply(engine.sgtk, context, set_script_knob=False)
-            self._log(engine, "info",
-                      "context_change: shot working dir -> %s" % result)
-        except Exception as exc:
-            self._log(engine, "error",
-                      "context_change: shot_workdir failed: %s" % exc)
 
     @staticmethod
     def _log(engine, level, message):

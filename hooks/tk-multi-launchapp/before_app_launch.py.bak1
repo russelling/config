@@ -31,10 +31,6 @@ import sgtk
 HookBaseClass = sgtk.get_hook_baseclass()
 
 _NUKE_ENGINES = ("tk-nuke", "tk-nukestudio")
-
-# STUDIO_NUKE_TEMP_DIR_2026_09_26: Nuke's disk cache / temp folder on Windows.
-# Windows only - Z: is a Windows drive letter; macOS/Linux keep Nuke's default.
-_NUKE_TEMP_DIR_WINDOWS = r"Z:\cache\nuke"
 _BLENDER_ENGINES = ("tk-blender",)
 
 # Where buf_blender_setup.py installs PySide6. Per-user and never inside
@@ -104,36 +100,6 @@ class BeforeAppLaunch(HookBaseClass):
             self.logger.info("Added Nuke tools repo to NUKE_PATH: %s" % nuke_tools)
         elif not os.path.isdir(nuke_tools):
             self.logger.warning("Nuke tools repo missing: %s" % nuke_tools)
-
-        self._setup_nuke_temp_dir()
-
-    def _setup_nuke_temp_dir(self):
-        """Set NUKE_TEMP_DIR on Windows (see _NUKE_TEMP_DIR_WINDOWS).
-
-        Only if the folder exists or can be created - pointing Nuke at an
-        unmounted Z: would leave it with no usable cache, so in that case
-        the variable is left alone and the reason logged."""
-        if sys.platform != "win32":
-            return
-        temp_dir = _NUKE_TEMP_DIR_WINDOWS
-        try:
-            if not os.path.isdir(temp_dir):
-                os.makedirs(temp_dir)
-        except OSError as exc:
-            self.logger.warning(
-                "NUKE_TEMP_DIR not set - could not create %s (%s). Is Z: "
-                "mounted? Nuke will use its default temp folder."
-                % (temp_dir, exc)
-            )
-            return
-        previous = os.environ.get("NUKE_TEMP_DIR")
-        os.environ["NUKE_TEMP_DIR"] = temp_dir
-        if previous and os.path.normcase(previous) != os.path.normcase(temp_dir):
-            self.logger.info(
-                "NUKE_TEMP_DIR was %s; set to %s" % (previous, temp_dir)
-            )
-        else:
-            self.logger.info("Set NUKE_TEMP_DIR: %s" % temp_dir)
 
     # -- Blender ----------------------------------------------------------
 

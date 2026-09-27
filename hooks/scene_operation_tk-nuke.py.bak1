@@ -42,21 +42,23 @@ Working-directory behavior:
   shot's own folders (plates/, render/, review/, reference/...) instead
   of wherever the artist last happened to browse.
 
-First-launch reliability (ROOT CAUSE FOUND 2026-09-26):
-  "New File had to be clicked twice" was not a timing race. In
-  tk-multi-workfiles2 v0.16.2, NewFileAction.execute() runs
-  reset -> prepare_new -> change_context, in that order, through the
-  Workfiles2 instance of the environment Nuke is CURRENTLY in. Nuke from
-  Desktop starts in the project environment, whose Workfiles2 had no
-  hook_scene_operation, so the app's stock hook ran prepare_new (a no-op) and
-  the script stayed blank; the second New File worked only because the engine
-  was by then in the shot context. Now every Nuke Workfiles2 instance uses
-  this hook, and prepare_new switches the engine into the target shot
-  context itself before saving and building (_ensure_engine_context), so
-  tk-nuke-writenode is loaded when the WriteTank is made. Workfiles2 then
-  sees the contexts already match and skips its own switch.
-  The writenode retry and the traceback-to-scene_op_debug.log wrapper stay
-  as belt and braces.
+First-launch reliability:
+  Historically, the color template would sometimes fail to build (or
+  silently fall back to a plain Write node instead of the TK Write node)
+  on the very first "New File" of a session, requiring a second attempt.
+  The best-understood contributor was `tk-multi-workfiles2`'s
+  `launch_at_startup: true` setting auto-opening the New/Open dialog
+  during Nuke startup - before every app instance (tk-nuke-writenode is
+  registered after tk-multi-workfiles2 in env/includes/settings/
+  tk-nuke-episodic.yml) is guaranteed to have finished initializing. That
+  setting has been switched to `false` (see that file) so the artist's
+  first real "New File" click always happens after Nuke/the engine has
+  settled. On top of that, this hook now (a) retries briefly for the
+  tk-nuke-writenode app instance instead of failing immediately, and (b)
+  wraps the whole template build in a try/except that logs a full
+  traceback to scene_op_debug.log and tells the artist in-app if it still
+  fails, instead of leaving them looking at a blank script with no
+  explanation.
 
 OCIO config: ACES 1.3
 Update OCIO_CAMERA_INPUT to match your camera:
@@ -196,24 +198,6 @@ class SceneOperation(HookClass):
             self._set_project_directory(context)
 
         elif operation == "reset":
-            # Ask before discarding unsaved work, as the stock hook does -
-            # this hook now also serves the project/shot/asset environments,
-            # which used the stock hook until 2026-09-26.
-            from sgtk.platform.qt import QtGui
-            while nuke.root().modified():
-                answer = QtGui.QMessageBox.question(
-                    None,
-                    "Save your script?",
-                    "Your script has unsaved changes. Save before proceeding?",
-                    QtGui.QMessageBox.Yes
-                    | QtGui.QMessageBox.No
-                    | QtGui.QMessageBox.Cancel,
-                )
-                if answer == QtGui.QMessageBox.Cancel:
-                    return False
-                if answer == QtGui.QMessageBox.No:
-                    break
-                nuke.scriptSave()
             nuke.scriptClear()
             return True
 
@@ -231,20 +215,14 @@ class SceneOperation(HookClass):
             return resolved
 
         elif operation == "prepare_new":
-            # STUDIO_NEWFILE_CONTEXT_FIX_2026_09_26
-            # Workfiles2 v0.16 "New File" calls reset, then this, and only
-            # THEN changes context - through the app instance of whatever
-            # environment Nuke is currently in (see the module docstring).
-            # So move the engine into the new shot context first, or the
-            # shot's apps (tk-nuke-writenode) are not loaded yet.
-            if not self._is_shot_context(context):
-                # Project / asset / sequence: nothing to build - same as the
-                # stock hook.
-                return True
-            engine = self._ensure_engine_context(context, engine)
-            # tk-nuke-writenode.create_new_write_node() needs a saved script
-            # to resolve its render template fields, so save to the
-            # versioned path BEFORE building the graph.
+            # tk-multi-workfiles2 v0.16+ "New File" action calls this op
+            # (after issuing a separate 'reset' first). At this point the
+            # script is empty and the context is the new shot/task.
+            #
+            # IMPORTANT: tk-nuke-writenode.create_new_write_node() needs a
+            # saved script to resolve its render template fields. So save
+            # the script to its versioned path BEFORE building the graph,
+            # mirroring what the legacy 'new' branch does.
             if self._is_first_version(context):
                 resolved = self._resolve_new_path(context)
                 self._ensure_dir(resolved)
@@ -254,8 +232,6 @@ class SceneOperation(HookClass):
                 self._set_project_directory(context)
                 self._safe_build_color_template(context, engine)
                 nuke.scriptSave()
-            else:
-                self._set_project_directory(context)
             return True
 
         elif operation == "version_up":
@@ -443,44 +419,15 @@ class SceneOperation(HookClass):
             return None
 
     def _set_project_directory(self, context):
-        """Make the shot folder Nuke's working location: project_directory
-        knob, cwd, and file-browser favourites (Shot, Shot plates, Shot
-        renders, ...). See hooks/shot_workdir.py. No-op for non-shot
-        contexts; never raises."""
+        """Point Nuke's root 'project_directory' knob at the shot's folder so
+        that Read/Write file browsers (and any relative paths) for new
+        elements default there instead of wherever was last browsed."""
         try:
-            import shot_workdir
-            shot_workdir.apply(self.parent.sgtk, context, set_script_knob=True)
+            shot_dir = self._shot_base_dir(context)
+            if shot_dir and os.path.isdir(shot_dir):
+                nuke.root()["project_directory"].setValue(self._p(shot_dir))
         except Exception as exc:
-            self._debug_log("Could not set shot working directory: %r" % exc)
-
-    # -------------------------------------------------------------------------
-    # Context helpers (STUDIO_NEWFILE_CONTEXT_FIX_2026_09_26)
-    # -------------------------------------------------------------------------
-
-    def _is_shot_context(self, context):
-        """True for a Shot + Step context the ep_* templates can resolve."""
-        try:
-            entity = context.entity or {}
-            if entity.get("type") != "Shot" or not context.step:
-                return False
-            self._fields(context)
-            return True
-        except Exception as exc:
-            self._debug_log("_is_shot_context: %r not buildable: %r" % (context, exc))
-            return False
-
-    def _ensure_engine_context(self, context, engine):
-        """Move the engine to `context` if it is not there yet; return the
-        current engine. Raises if the context change fails - Workfiles2
-        shows that to the artist, which beats a silently blank script."""
-        if engine is not None and engine.context == context:
-            return engine
-        self._debug_log(
-            "prepare_new: changing context %s -> %s before building"
-            % (getattr(engine, "context", None), context)
-        )
-        sgtk.platform.change_context(context)
-        return sgtk.platform.current_engine() or engine
+            self._debug_log("Could not set project_directory: %r" % exc)
 
     # -------------------------------------------------------------------------
     # Plates scanning
@@ -627,13 +574,9 @@ class SceneOperation(HookClass):
 
             for i, seq in enumerate(plate_sequences[1:], start=1):
                 extra = plate_reads.make_read(
-                    seq, primary=False, note="Not wired - connect manually"
+                    seq, primary=False, note="Not wired — connect manually"
                 )
-                # Every sequence is loaded now, so there can be a dozen:
-                # a row to the left of the primary, 8 per row, rows
-                # stacking upward.
-                row, col = divmod(i - 1, 8)
-                extra.setXYpos(x_main - 150 * (col + 1), y0 - row * y_step)
+                extra.setXYpos(x_extra, y0 + (i - 1) * y_step)
         else:
             # No EXRs found in plates/ yet (e.g. before plates are
             # delivered). Keep the graph structurally valid with a
@@ -762,9 +705,7 @@ class SceneOperation(HookClass):
         plate_summary = (
             "\n".join(
                 "  - %s (%d-%d)%s"
-                % (s["label"], s["first"], s["last"],
-                   ("" if i == 0 else "  [not wired]")
-                   + ("  [older delivery]" if s.get("older") else ""))
+                % (s["label"], s["first"], s["last"], "" if i == 0 else "  [not wired]")
                 for i, s in enumerate(plate_sequences)
             )
             if plate_sequences

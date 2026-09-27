@@ -35,19 +35,12 @@ contents are discovered.
 Folders with no EXRs in them are simply never seen, which is what filters
 out the artwork drops for free.
 
-EVERY SEQUENCE, LATEST FIRST
-----------------------------
-Every EXR sequence under plates/ gets a Read: every element, every
-redelivered version, every resolution folder, every sequence sharing a
-folder, down to MAX_SCAN_DEPTH folders (so plates/test/test_05/4608x2592/ is
-found too). bg01 and bg01_v02 are still recognised as the same element - the
-highest version is its "best" record and sorts first; lower versions are
-labelled OLDER DELIVERY. Elements are ordered bg, then el, then ref, then
-anything else, so the first record is the plate the colour template wires in.
-
-scan_plates(..., latest_only=True) gives the old one-per-element behaviour.
-(Changed 2026-09-26. Before that: latest version of each element only, the
-biggest sequence per folder only, two folders deep only.)
+ONE READ PER ELEMENT, LATEST VERSION
+------------------------------------
+bg01 and bg01_v02 are the same element redelivered, so only the highest
+version gets a node; the older ones are named in the node's label so the
+artist knows they exist. Elements are ordered bg, then el, then ref, then
+anything else, so the graph reads top to bottom the way a comp is built.
 
 COLOUR
 ------
@@ -62,20 +55,10 @@ label rather than quietly mis-tagging the plate.
 import os
 import re
 
-# Frame token = the WHOLE trailing digit run before .exr (the lazy stem is
-# what guarantees that). The separator before it is optional - all three
-# occur on the share:
-#   301_001_0050_bg01_1001.exr            '_'
-#   301_001_0050.1001.exr                 '.'
-#   302_001_0010_bg01_INHPULL1001.exr     none (in-house pulls)
+# Frame token: 301_001_0050_bg01_1001.exr, and the older 301_001_0050.1001.exr
 PLATE_SEQ_RE = re.compile(
-    r"^(?P<stem>.*?)(?P<frame>\d+)\.(?P<ext>exr)$", re.IGNORECASE
+    r"^(?P<base>.+?)[._](?P<frame>\d{3,8})\.(?P<ext>exr)$", re.IGNORECASE
 )
-FRAME_DIGITS_MIN, FRAME_DIGITS_MAX = 3, 8
-
-# Folders below plates/ to search. plates/<element>/<WxH>/ is depth 2,
-# plates/test/test_05/<WxH>/ is depth 3.
-MAX_SCAN_DEPTH = 5
 
 # Trailing delivery version on an element folder: bg01_v02 -> bg01, 2
 ELEMENT_VERSION_RE = re.compile(r"^(?P<name>.+?)_v(?P<version>\d+)$", re.IGNORECASE)
@@ -107,30 +90,13 @@ def _is_hidden(name):
     return name.startswith(".") or name.startswith("._")
 
 
-def _split_frame(name):
-    """
-    '301_001_0050_bg01_1001.exr' -> ('301_001_0050_bg01', '_', '1001').
-    None when the name carries no usable frame number.
-    """
-    match = PLATE_SEQ_RE.match(name)
-    if not match:
-        return None
-    frame = match.group("frame")
-    if not FRAME_DIGITS_MIN <= len(frame) <= FRAME_DIGITS_MAX:
-        return None
-    stem = match.group("stem")
-    if stem and stem[-1] in "._":
-        return stem[:-1], stem[-1], frame
-    return stem, "", frame
-
-
 def _sequences_in_dir(directory):
     """
     Group the EXRs sitting directly in one directory into sequences.
 
-    Returns a list of {base, pad, separator, frames, count}, biggest first.
-    A directory normally holds one sequence; if a vendor put two passes in
-    the same folder, both come back.
+    Returns a list of {base, pad, frames} sorted biggest first. A directory
+    normally holds exactly one sequence; more than one means the vendor put
+    two passes in the same folder, and the biggest is the plate.
     """
     try:
         names = sorted(os.listdir(directory))
@@ -141,9 +107,10 @@ def _sequences_in_dir(directory):
     for name in names:
         if _is_hidden(name) or not name.lower().endswith(".exr"):
             continue
-        split = _split_frame(name)
-        if split:
-            base, separator, frame = split
+        match = PLATE_SEQ_RE.match(name)
+        if match:
+            base, frame = match.group("base"), match.group("frame")
+            separator = name[len(base)]
             key = (base, len(frame), separator)
             groups.setdefault(key, []).append(int(frame))
         else:
@@ -160,7 +127,7 @@ def _sequences_in_dir(directory):
             "frames": real,
             "count": len(frames),
         })
-    out.sort(key=lambda g: (-g["count"], g["base"]))
+    out.sort(key=lambda g: g["count"], reverse=True)
     return out
 
 
@@ -205,36 +172,35 @@ def _element_sort_key(element):
     return (len(ELEMENT_ORDER), lowered)
 
 
-def _walk_dirs(plates_dir):
+def _candidate_dirs(plates_dir):
     """
-    (directory, depth) for plates_dir (depth 0) and every folder under it
-    down to MAX_SCAN_DEPTH, hidden folders skipped, in a stable order.
+    (element_folder_name, directory, depth) for every place plates can hide:
+    the plates folder itself (depth 0), each element folder (1), and each
+    element's resolution folder (2). No deeper - past that is somebody's
+    working folder, not a delivery.
     """
-    for root, dirs, _files in os.walk(plates_dir):
-        rel = os.path.relpath(root, plates_dir)
-        depth = 0 if rel == os.curdir else rel.count(os.sep) + 1
-        dirs[:] = sorted(d for d in dirs if not _is_hidden(d))
-        if depth >= MAX_SCAN_DEPTH:
-            dirs[:] = []
-        yield root, depth
-
-
-def _element_folder(plates_dir, directory):
-    """
-    (folder that names the element, resolution) for one directory.
-
-    A WxH resolution folder is named by its parent; plates/ itself names
-    nothing (loose EXRs are named after the file instead).
-    """
-    if os.path.normpath(directory) == os.path.normpath(plates_dir):
-        return "", None
-    name = os.path.basename(directory)
-    if RESOLUTION_RE.match(name):
-        parent = os.path.dirname(directory)
-        if os.path.normpath(parent) == os.path.normpath(plates_dir):
-            return "", name
-        return os.path.basename(parent), name
-    return name, None
+    yield "", plates_dir, 0
+    try:
+        entries = sorted(os.listdir(plates_dir))
+    except OSError:
+        return
+    for entry in entries:
+        if _is_hidden(entry):
+            continue
+        element_dir = os.path.join(plates_dir, entry)
+        if not os.path.isdir(element_dir):
+            continue
+        yield entry, element_dir, 1
+        try:
+            children = sorted(os.listdir(element_dir))
+        except OSError:
+            continue
+        for child in children:
+            if _is_hidden(child):
+                continue
+            child_dir = os.path.join(element_dir, child)
+            if os.path.isdir(child_dir):
+                yield entry, child_dir, 2
 
 
 def _resolution_pixels(directory):
@@ -245,78 +211,70 @@ def _resolution_pixels(directory):
     return int(match.group("w")) * int(match.group("h"))
 
 
-def scan_plates(plates_dir, shot_code=None, latest_only=False):
+def scan_plates(plates_dir, shot_code=None, latest_only=True):
     """
-    Every EXR sequence found under plates_dir, best delivery first.
+    Every plate element found under plates_dir, best delivery first.
 
-    Each record carries the keys the colour-template build expects
-    (nuke_path / first / last / label / count) plus:
+    Each record carries the keys the colour-template build already expects
+    (nuke_path / first / last / label / count) plus the element metadata:
 
         element     'bg01'          - grouping name, version stripped
         version     2               - delivery version, 0 if unversioned
-        folder      '/.../bg01_v02/4608x2592'
-        relpath     'bg01_v02/4608x2592' - folder relative to plates/
+        folder      '/.../bg01_v02' - where it was found
         resolution  '4608x2592'     - or None
-        best        True            - the one record chosen for its element
-        older       False           - True when a higher version of the
-                                      same element is on disk
-        superseded  [1]             - (best only) older versions on disk
-        alternates  ['3840x2160']   - (best only) other resolutions
+        superseded  [1]             - older versions of this element on disk
+        alternates  ['3840x2160']   - other resolution folders with frames
 
-    latest_only=True keeps just the best record per element.
+    latest_only keeps one record per element (the highest version). Pass
+    False to get them all.
     """
     if not plates_dir or not os.path.isdir(plates_dir):
         return []
 
     found = []
-    for directory, _depth in _walk_dirs(plates_dir):
+    for folder_name, directory, depth in _candidate_dirs(plates_dir):
         groups = _sequences_in_dir(directory)
         if not groups:
             continue
-        folder_name, resolution = _element_folder(plates_dir, directory)
-        for index, group in enumerate(groups):
-            if folder_name and index == 0:
-                element, version = _split_element(folder_name, shot_code)
-            else:
-                # Loose in plates/, or a second sequence sharing a folder:
-                # name it after the file.
-                element, version = _split_element(group["base"], shot_code)
-            if not element:
-                element = group["base"] or os.path.basename(directory)
-            frames = group["frames"]
-            found.append({
-                "element": element,
-                "key": element.lower(),
-                "version": version,
-                "folder": directory,
-                "relpath": os.path.relpath(directory, plates_dir),
-                "resolution": resolution,
-                "nuke_path": _nuke_path(directory, group["base"], group["pad"],
-                                        group["separator"]),
-                "label": group["base"],
-                "first": frames[0] if frames else 1,
-                "last": frames[-1] if frames else 1,
-                "count": group["count"],
-                "best": False,
-                "older": False,
-                "superseded": [],
-                "alternates": [],
-            })
+        group = groups[0]
+        element, version = _split_element(folder_name or "", shot_code)
+        if not element:
+            # EXRs loose in plates/ - name the element after the file itself.
+            element = group["base"]
+        frames = group["frames"]
+        found.append({
+            "element": element,
+            "key": element.lower(),
+            "version": version,
+            "folder": directory,
+            "resolution": os.path.basename(directory) if depth == 2 else None,
+            "nuke_path": _nuke_path(directory, group["base"], group["pad"],
+                                    group["separator"]),
+            "label": group["base"],
+            "first": frames[0] if frames else 1,
+            "last": frames[-1] if frames else 1,
+            "count": group["count"],
+            "superseded": [],
+            "alternates": [],
+        })
 
-    # Per element: highest version, then most frames, then biggest
-    # resolution is "best". Everything it beat is recorded on it.
+    # One record per element: highest version, then most frames, then the
+    # biggest resolution. Everything it beat is recorded on it so the label
+    # can say what else is on disk.
     by_element = {}
     for record in found:
         by_element.setdefault(record["key"], []).append(record)
 
     results = []
-    for records in by_element.values():
+    for key, records in by_element.items():
         records.sort(
             key=lambda r: (r["version"], r["count"], _resolution_pixels(r["folder"])),
             reverse=True,
         )
+        if not latest_only:
+            results.extend(records)
+            continue
         best = records[0]
-        best["best"] = True
         best["superseded"] = sorted(
             {r["version"] for r in records[1:] if r["version"] != best["version"]}
         )
@@ -325,12 +283,9 @@ def scan_plates(plates_dir, shot_code=None, latest_only=False):
             if r["version"] == best["version"] and r["resolution"]
             and r["resolution"] != best["resolution"]
         ]
-        for record in records[1:]:
-            record["older"] = record["version"] < best["version"]
-        results.extend(records[:1] if latest_only else records)
+        results.append(best)
 
-    results.sort(key=lambda r: (_element_sort_key(r["element"]), not r["best"],
-                                -r["version"], r["relpath"].lower()))
+    results.sort(key=lambda r: (_element_sort_key(r["element"]), -r["version"]))
     return results
 
 
@@ -341,8 +296,6 @@ def describe(record):
         bits.append("v%02d" % record["version"])
     if record["resolution"]:
         bits.append(record["resolution"])
-    if record.get("older"):
-        bits.append("[older delivery]")
     return "%s  (%d-%d, %d frames)" % (
         "  ".join(bits), record["first"], record["last"], record["count"]
     )
@@ -436,8 +389,6 @@ def make_read(record, primary=False, note=""):
              else "PLATE (extra): %s" % record["element"]]
     if record["version"]:
         lines[0] += " v%02d" % record["version"]
-    if record.get("older"):
-        lines.append("OLDER DELIVERY - a newer version is on disk")
     lines.append("%s — %d-%d" % (colour_note, record["first"], record["last"]))
     if record["resolution"]:
         lines.append(record["resolution"])
