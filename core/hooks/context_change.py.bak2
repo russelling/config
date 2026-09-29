@@ -42,8 +42,6 @@ HookBaseClass = get_hook_baseclass()
 _COMMAND_MODULES = (
     ("plate_reads.py", "plate_reads"),
     ("dailies_viewer.py", "dailies_viewer"),
-    # STUDIO_BUFFALO_MENU_2026_09_29 -- keep in step with engine_init.py.
-    ("write_node_rebuild.py", "write_node_rebuild"),
 )
 
 
@@ -98,20 +96,19 @@ class ContextChange(HookBaseClass):
                           % (module_name, exc))
 
         # tk-nuke already rebuilt its menu before this hook ran, without these
-        # commands. STUDIO_BUFFALO_MENU_2026_09_29: hooks/buffalo_menu.py now
-        # files them (and the config/nuke tools) under Flow Production
-        # Tracking > Buffalo VFX and rebuilds the menu once, under the same
-        # conditions tk-nuke itself checks.
+        # commands. Rebuild once more, respecting the same conditions tk-nuke
+        # itself checks (no UI in batch; Nuke Studio env pre-loading turns
+        # rebuilds off temporarily).
+        if not registered_any:
+            return
         try:
-            path = os.path.join(config_root, "hooks", "buffalo_menu.py")
-            spec = importlib.util.spec_from_file_location("buffalo_menu", path)
-            buffalo_menu = importlib.util.module_from_spec(spec)
-            sys.modules["buffalo_menu"] = buffalo_menu
-            spec.loader.exec_module(buffalo_menu)
-            buffalo_menu.organise(engine)
+            if (getattr(engine, "has_ui", False)
+                    and getattr(engine, "_context_change_menu_rebuild", True)
+                    and getattr(engine, "menu_generator", None) is not None):
+                engine.menu_generator.create_menu()
         except Exception as exc:
             self._log(engine, "error",
-                      "context_change: buffalo_menu failed: %s" % exc)
+                      "context_change: menu rebuild failed: %s" % exc)
 
     def _apply_shot_workdir(self, engine, context):
         try:

@@ -60,24 +60,6 @@ nuke.knobDefault("Root.OCIO_config", "custom")
 nuke.knobDefault("Root.customOCIOConfigPath", _STUDIO_OCIO_CONFIG_PATH)
 
 
-# ── Studio format + frame rate for new scripts ──────────────────────────────
-# STUDIO_BUFFALO_MENU_2026_09_29 -- Mark's request 2026-09-29: every new Nuke
-# script starts at 23.976 fps on a 4608x2592 square-pixel working format
-# (the ALEXA 35 4.6K 16:9 plate size, e.g. plates/<element>/4608x2592/).
-# knobDefault only reaches NEW Root nodes -- a fresh Nuke, File > New, and
-# Workfiles2 New File (scene_operation_tk-nuke.py scriptClear()s first) --
-# so already-saved scripts keep the format and fps they were authored with,
-# unlike the OCIO values above, which are forced on every open.
-_STUDIO_FORMAT_NAME = "BUF_4608x2592"
-_STUDIO_FORMAT = "4608 2592 1.0 %s" % _STUDIO_FORMAT_NAME
-_STUDIO_FPS = "23.976"
-
-if _STUDIO_FORMAT_NAME not in [f.name() for f in nuke.formats()]:
-    nuke.addFormat(_STUDIO_FORMAT)
-nuke.knobDefault("Root.format", _STUDIO_FORMAT_NAME)
-nuke.knobDefault("Root.fps", _STUDIO_FPS)
-
-
 # ── Studio color defaults enforced on every script open (new or old) ────────
 # Mark's request 2026-09-16: every Nuke instance should open on the studio
 # OCIO config with the Viewer already showing the Rec.709 ACES Output

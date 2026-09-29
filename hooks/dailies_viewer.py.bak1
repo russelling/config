@@ -1112,10 +1112,6 @@ def cmd_disable():
     _reload_self()._run_disable()
 
 
-# STUDIO_BUFFALO_MENU_LAYOUT_2026_09_29: the three Viewer commands are named
-# "Dailies Viewer - ..." so they group together; their order and the
-# separators in Flow Production Tracking > Buffalo VFX come from _LAYOUT in
-# hooks/buffalo_menu.py -- rename here, rename there.
 def register(engine):
     """Register the menu commands with the Flow Production Tracking menu.
     Same pattern as plate_reads.py's register(engine) -- call this from
@@ -1130,21 +1126,21 @@ def register(engine):
                         "Changes nothing."},
     )
     engine.register_command(
-        "Dailies Viewer - Rebuild",
+        "Rebuild Dailies Viewer Chain",
         cmd_rebuild,
         {"short_name": "rebuild_dailies_viewer",
          "description": "(Re)build the BUF_DailiesViewer node group for "
                         "this shot's current CDL/LUT, without turning it on."},
     )
     engine.register_command(
-        "Dailies Viewer - Enable",
+        "Enable Dailies Viewer (Input Process)",
         cmd_enable,
         {"short_name": "enable_dailies_viewer",
          "description": "Build if needed, then show this shot's dailies "
                         "match in the Viewer via Input Process."},
     )
     engine.register_command(
-        "Dailies Viewer - Disable",
+        "Disable Dailies Viewer (Input Process)",
         cmd_disable,
         {"short_name": "disable_dailies_viewer",
          "description": "Turn the dailies-match Input Process off and "
