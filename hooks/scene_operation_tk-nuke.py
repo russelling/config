@@ -134,6 +134,14 @@ try:
             _add_review_button(n)
 
     nuke.addOnScriptLoad(_wire_all_on_script_load)
+
+    # STUDIO_FARM_RENDER_2026_10_03 -- 'Render on: Local / Farm (Deadline)'
+    # on every WriteTank. See hooks/farm_render.py.
+    try:
+        import farm_render as _farm_render
+        _farm_render.install()
+    except Exception as _farm_exc:
+        nuke.warning("[farm_render] Could not add render controls: %s" % _farm_exc)
 except Exception as _exc:
     nuke.warning("[render_complete] Could not register Send to Review button: %s" % _exc)
 
@@ -346,7 +354,7 @@ class SceneOperation(HookClass):
         session like 2026-06-16.
         """
         try:
-            log_dir = "/Volumes/atv-post-lucid3/atv-buffalo-s03/buffalo_vfx/buffalo_flow_config/logs"
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")  # <config>/flow/current/logs
             if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
             log_path = os.path.join(log_dir, "scene_op_debug.log")

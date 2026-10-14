@@ -53,7 +53,43 @@ except ImportError:
 # registry moved "-latest" forward to studio-config-v4.0.0_aces-v2.0_ocio-
 # v2.5 (ACES 2.0) -- and it turned out Nuke's own bundled OCIO (2.2.1)
 # didn't even recognize the alias at all.
-_STUDIO_OCIO_CONFIG_PATH = "ocio://studio-config-v1.0.0_aces-v1.3_ocio-v2.1"
+# STUDIO_OCIO_FILE_2026_10_13
+# Nuke 17.1 (the Deadline farm) rejects an ocio:// URI in
+# Root.customOCIOConfigPath ("invalid OpenColorIO config file ... Config will
+# not be loaded") although its own OCIO 2.4.2 resolves the URI fine -- every
+# ACES name in a farm render was then unknown and the job died. So Nuke now
+# points at a FILE: the same built-in config, serialised with PyOpenColorIO
+# 2.4.2, kept next to this file in ocio/. A plain path loads in 17.0 and 17.1,
+# and Deadline path mapping translates it for the Linux workers.
+_STUDIO_OCIO_BUILTIN = "studio-config-v1.0.0_aces-v1.3_ocio-v2.1"
+
+
+def _studio_ocio_config_path():
+    import os
+    dirs = []
+    try:
+        dirs.append(os.path.dirname(os.path.abspath(__file__)))
+    except NameError:
+        pass
+    try:
+        dirs.extend(nuke.pluginPath())
+    except Exception:
+        pass
+    for folder in dirs:
+        path = os.path.join(folder, "ocio", _STUDIO_OCIO_BUILTIN + ".ocio")
+        if os.path.isfile(path):
+            path = path.replace("\\", "/")
+            nuke.tprint("[studio-color-defaults] OCIO config file: %s" % path)
+            return path
+    nuke.tprint(
+        "[studio-color-defaults] WARNING: ocio/%s.ocio not found next to "
+        "init.py (searched %s). Using ocio://%s -- Deadline renders on Nuke "
+        "17.1 WILL fail to load colour." % (
+            _STUDIO_OCIO_BUILTIN, dirs, _STUDIO_OCIO_BUILTIN))
+    return "ocio://" + _STUDIO_OCIO_BUILTIN
+
+
+_STUDIO_OCIO_CONFIG_PATH = _studio_ocio_config_path()
 
 nuke.knobDefault("Root.colorManagement", "OCIO")
 nuke.knobDefault("Root.OCIO_config", "custom")
