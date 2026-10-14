@@ -20,5 +20,8 @@ placeholder
 .gitignore
 .git
 
+# ignore patch-script backups (e.g. nuke.yml.bak.1) -- 2026-10-14
+*.bak*
+
 # this is the last line of the file
 ##########################################################################################
