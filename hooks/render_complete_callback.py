@@ -355,6 +355,23 @@ def run_render_complete(write_node):
     # embedded timecode (handled gracefully downstream).
     start_tc = _read_embedded_start_tc(render_files, first_frame, render_work_template)
 
+    # The artist is the Flow (SGTK) user signed in to this session, NOT
+    # the workstation login: on this show the two differ (2026-10-15).
+    # user_id is what qt_watcher resolves for the manifest and Version.user.
+    sg_user = None
+    try:
+        sg_user = sgtk.util.get_current_user(tk)
+    except Exception as exc:
+        nuke.warning("[render_complete] Could not resolve the Flow user: %s" % exc)
+    if sg_user and sg_user.get("id"):
+        artist = sg_user.get("name") or sg_user.get("login") or ""
+        artist_user_id = sg_user["id"]
+    else:
+        artist = getpass.getuser()
+        artist_user_id = None
+        nuke.warning("[render_complete] No Flow user for this session; flag "
+                     "carries workstation login %r and no user_id" % artist)
+
     flag_data = {
         "project_id": ctx.project["id"] if ctx.project else None,
         "project_name": ctx.project["name"] if ctx.project else None,
@@ -371,7 +388,8 @@ def run_render_complete(write_node):
         "vendor_code": fields.get("vendor_code") or "INH",
         "version": fields.get("version"),
         "output": output_name,
-        "artist": getpass.getuser(),
+        "artist": artist,
+        "user_id": artist_user_id,
         "date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "frame_first": first_frame,
         "frame_last": last_frame,
