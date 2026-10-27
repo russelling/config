@@ -165,6 +165,16 @@ WRITE_PRESET_BY_STEP = {
     "comp": "Primary EXR (32-bit)",
 }
 
+# STUDIO_NEWFILE_FRAME_RANGE_2026_10_27
+# New scripts get their root frame range from Flow first (the Shot's cut
+# in/out - the same fields tk-multi-setframerange uses by default), then
+# from the BG01 plate on disk. Change the field names here, not the code.
+SG_FRAME_IN_FIELD = "sg_cut_in"
+SG_FRAME_OUT_FIELD = "sg_cut_out"
+# "bg01" anywhere in the element / file / folder name, not part of a
+# longer word or number: matches bg01, BG01, BG1, bg001; not bg010, bg11.
+FRAME_RANGE_PLATE_RE = re.compile(r"(?<![a-z0-9])bg0*1(?![0-9])", re.IGNORECASE)
+
 # Matches an EXR frame like "301_001_010_takeA.1001.exr" or
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
 # Anything under plates/ that doesn't match this is treated as a single,
@@ -233,9 +243,10 @@ class SceneOperation(HookClass):
             if hasattr(engine, "save_context_to_script"):
                 engine.save_context_to_script()
             self._set_project_directory(context)
+            self._safe_apply_frame_range(context)
             if self._is_first_version(context):
                 self._safe_build_color_template(context, engine)
-                nuke.scriptSave()
+            nuke.scriptSave()
             return resolved
 
         elif operation == "prepare_new":
@@ -260,10 +271,12 @@ class SceneOperation(HookClass):
                 if hasattr(engine, "save_context_to_script"):
                     engine.save_context_to_script()
                 self._set_project_directory(context)
+                self._safe_apply_frame_range(context)
                 self._safe_build_color_template(context, engine)
                 nuke.scriptSave()
             else:
                 self._set_project_directory(context)
+                self._safe_apply_frame_range(context)
             return True
 
         elif operation == "version_up":
@@ -541,6 +554,90 @@ class SceneOperation(HookClass):
         return records
 
     # -------------------------------------------------------------------------
+    # Frame range for new scripts (STUDIO_NEWFILE_FRAME_RANGE_2026_10_27)
+    # -------------------------------------------------------------------------
+
+    def _shotgrid_frame_range(self, context):
+        """(first, last) from the Shot's cut in/out on Flow, or None if the
+        context is not a Shot, the query fails, or either value is empty."""
+        entity = context.entity or {}
+        if entity.get("type") != "Shot" or not entity.get("id"):
+            return None
+        try:
+            shot = self.parent.shotgun.find_one(
+                "Shot", [["id", "is", entity["id"]]],
+                [SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD],
+            )
+        except Exception as exc:
+            self._debug_log("frame range: Flow query failed for %r: %r" % (entity, exc))
+            return None
+        if not shot:
+            return None
+        first, last = shot.get(SG_FRAME_IN_FIELD), shot.get(SG_FRAME_OUT_FIELD)
+        if first is None or last is None:
+            return None
+        try:
+            first, last = int(first), int(last)
+        except (TypeError, ValueError):
+            return None
+        if last < first:
+            self._debug_log(
+                "frame range: ignoring Flow range %d-%d on %s (out before in)"
+                % (first, last, entity.get("name"))
+            )
+            return None
+        return first, last
+
+    def _bg01_plate_range(self, context):
+        """((first, last), description) from the newest BG01 plate delivery
+        on disk, or (None, None). Uses the same scan as the plate Reads, so
+        the range always matches the Read the template builds."""
+        plates_dir = self._plates_dir(context)
+        if not plates_dir:
+            return None, None
+        shot = (context.entity or {}).get("name")
+        for record in self._scan_plate_sequences(plates_dir, shot_code=shot):
+            if record.get("older") or record.get("count", 0) < 2:
+                continue
+            names = " ".join(
+                str(record.get(k) or "") for k in ("element", "label", "relpath")
+            )
+            if FRAME_RANGE_PLATE_RE.search(names):
+                return (record["first"], record["last"]), record["relpath"]
+        return None, None
+
+    def _safe_apply_frame_range(self, context):
+        """Set the root first/last frame on a new script: Flow cut in/out
+        first, then the BG01 plate, else leave Nuke's default. Never raises;
+        records what it did for the build message (_frame_range_summary)."""
+        self._frame_range_note = "unchanged (Nuke default)"
+        try:
+            frame_range = self._shotgrid_frame_range(context)
+            source = "Flow %s / %s" % (SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD)
+            if frame_range is None:
+                frame_range, plate = self._bg01_plate_range(context)
+                source = "BG01 plate %s" % plate
+            if frame_range is None:
+                self._frame_range_note = (
+                    "NOT SET - no cut in/out on Flow and no BG01 plate on disk"
+                )
+                self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
+                return
+            first, last = frame_range
+            root = nuke.root()
+            root["last_frame"].setValue(last)
+            root["first_frame"].setValue(first)
+            root["last_frame"].setValue(last)
+            self._frame_range_note = "%d-%d  (from %s)" % (first, last, source)
+            self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
+        except Exception as exc:
+            self._frame_range_note = "NOT SET - error: %s" % exc
+            self._debug_log("frame range failed for %s: %r" % (context, exc))
+
+    def _frame_range_summary(self):
+        return getattr(self, "_frame_range_note", "unchanged (Nuke default)")
+
+    # -------------------------------------------------------------------------
     # tk-nuke-writenode app lookup (with retry)
     # -------------------------------------------------------------------------
 
@@ -782,6 +879,7 @@ class SceneOperation(HookClass):
         nuke.message(
             "Color pipeline loaded for %s.\n\n"
             "Working space : ACEScg\n\n"
+            "Frame range   : %s\n\n"
             "Plates (plates/, assumed ACEScg linear, raw — no conversion):\n%s\n\n"
             "VFX Pulls : Replace path in VFX PULL Read node\n"
             "  → raw read, already ACEScg — no conversion needed\n\n"
@@ -791,5 +889,6 @@ class SceneOperation(HookClass):
             "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
-            % (shot, plate_summary, render_path, write_preset)
+            % (shot, self._frame_range_summary(), plate_summary, render_path,
+               write_preset)
         )

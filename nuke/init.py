@@ -145,6 +145,14 @@ nuke.knobDefault("Root.fps", _STUDIO_FPS)
 # Script Editor / terminal) if nothing matches instead of silently
 # leaving the default wrong.
 
+# STUDIO_VIEWER_RAW_2026_10_27
+# Mark's request 2026-10-27: the Viewer defaults to the Raw view on the
+# Rec.1886 Rec.709 display (no ACES output transform) instead of
+# ACES 1.0 - SDR Video. Same enforcement as before, different target.
+# Change these two names, not the matching code, to move it again.
+_STUDIO_VIEWER_DISPLAY = "Rec.1886 Rec.709 - Display"
+_STUDIO_VIEWER_VIEW = "Raw"
+
 _REC709_VIEWER_PROCESS_CACHE = {}
 
 
@@ -177,28 +185,29 @@ def _find_rec709_viewer_process(config_path):
             nuke.delete(tmp_viewer)
         nuke.root().setModified(was_modified)
 
+    # Exact display + view match. Nuke spells the value either
+    # "Raw (Rec.1886 Rec.709 - Display)" or "Rec.1886 Rec.709 - Display/Raw";
+    # stripping the display name and the punctuation leaves the view.
     candidates = [
         c for c in choices
-        if "Rec.1886 Rec.709" in c
-        and "Rec.709)" in c
-        and "Un-tone-mapped" not in c
-        and "Raw" not in c
-        and "colorimetric" not in c
+        if _STUDIO_VIEWER_DISPLAY in c
+        and c.replace(_STUDIO_VIEWER_DISPLAY, "").strip(" ()/") == _STUDIO_VIEWER_VIEW
     ]
     if not candidates:
         nuke.tprint(
             "[studio-color-defaults] WARNING: no viewerProcess choice "
-            "matched the Rec.709 SDR Output Transform for %s. Leaving "
+            "matched %s (%s) for %s. Leaving "
             "Viewer default untouched. Available choices: %s"
-            % (config_path, choices)
+            % (_STUDIO_VIEWER_VIEW, _STUDIO_VIEWER_DISPLAY, config_path, choices)
         )
         result = None
     else:
         if len(candidates) > 1:
             nuke.tprint(
                 "[studio-color-defaults] WARNING: %d viewerProcess choices "
-                "matched Rec.709 SDR for %s, using the first: %s"
-                % (len(candidates), config_path, candidates)
+                "matched %s (%s) for %s, using the first: %s"
+                % (len(candidates), _STUDIO_VIEWER_VIEW,
+                   _STUDIO_VIEWER_DISPLAY, config_path, candidates)
             )
         result = candidates[0]
         nuke.tprint("[studio-color-defaults] Viewer default -> %r" % (result,))
