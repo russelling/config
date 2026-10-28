@@ -16,8 +16,9 @@ Color pipeline (first open only):
       in as the primary plate, any others are added alongside, unwired,
       for the artist to hook up manually.
     - Dot (labelled "ACEScg working") off the primary plate Read
-    - Merge2 <- Read node for VFX pull placeholder (raw, ACEScg)
     - Dot (labelled "to Write")
+    (STUDIO_NO_VFX_PULL_READ_2026_10_28: the VFX PULL placeholder Read and its
+    Merge2 were removed at Mark's request.)
     - Write node (EXR, raw/ACEScg, no bake)
     - Viewer (OCIO display transform handles LogC4->CDL->LUT->Rec.709)
 
@@ -174,6 +175,22 @@ SG_FRAME_OUT_FIELD = "sg_cut_out"
 # "bg01" anywhere in the element / file / folder name, not part of a
 # longer word or number: matches bg01, BG01, BG1, bg001; not bg010, bg11.
 FRAME_RANGE_PLATE_RE = re.compile(r"(?<![a-z0-9])bg0*1(?![0-9])", re.IGNORECASE)
+
+# STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+# sg_cut_in/out include the handles (per Mark), so the script range above
+# is the full plate length. The cut = range minus these handle lengths.
+# Fields are found by DISPLAY NAME in the Flow Shot schema - add a name
+# here if the field is ever renamed. See _handle_fields().
+SG_HANDLES_HEAD_NAMES = ("Handles Head", "Head Handles")
+SG_HANDLES_TAIL_NAMES = ("Handles Tail", "Tail Handles")
+CUT_NOTE_NAME = "CutInfo"
+
+# STUDIO_NEWFILE_REGRAIN_QC_2026_10_28
+# DasGrain is pasted from the shared tools folder (repo/installers/nuke,
+# overridable with BUF_NUKE_SHARED_TOOLS like the Shared Tools menu). The
+# file also holds a DegrainHelper group, which is removed after pasting.
+DASGRAIN_FILE_NAME = "DasGrain.nk"
+DASGRAIN_GROUP_PREFIX = "DasGrain"
 
 # Matches an EXR frame like "301_001_010_takeA.1001.exr" or
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
@@ -611,6 +628,8 @@ class SceneOperation(HookClass):
         first, then the BG01 plate, else leave Nuke's default. Never raises;
         records what it did for the build message (_frame_range_summary)."""
         self._frame_range_note = "unchanged (Nuke default)"
+        self._cut = None
+        self._cut_note = "not marked - script range not set"
         try:
             frame_range = self._shotgrid_frame_range(context)
             source = "Flow %s / %s" % (SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD)
@@ -630,9 +649,227 @@ class SceneOperation(HookClass):
             root["last_frame"].setValue(last)
             self._frame_range_note = "%d-%d  (from %s)" % (first, last, source)
             self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
+            self._cut = self._cut_from_handles(context, first, last)
+            self._apply_cut_marks()
         except Exception as exc:
             self._frame_range_note = "NOT SET - error: %s" % exc
             self._debug_log("frame range failed for %s: %r" % (context, exc))
+
+    # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+    _HANDLE_FIELD_CACHE = {}
+
+    def _handle_fields(self):
+        """(head_code, tail_code) of the Shot fields whose display names are in
+        SG_HANDLES_HEAD_NAMES / SG_HANDLES_TAIL_NAMES. Read once per session
+        from the Flow schema; a failed read is not cached."""
+        cache = self.__class__._HANDLE_FIELD_CACHE
+        if "fields" in cache:
+            return cache["fields"]
+        try:
+            schema = self.parent.shotgun.schema_field_read("Shot")
+        except Exception as exc:
+            self._debug_log("handles: Shot schema read failed: %r" % exc)
+            return None, None
+        want_head = set(n.lower() for n in SG_HANDLES_HEAD_NAMES)
+        want_tail = set(n.lower() for n in SG_HANDLES_TAIL_NAMES)
+        head = tail = None
+        for code, info in sorted(schema.items()):
+            name = ((info.get("name") or {}).get("value") or "").strip().lower()
+            if name in want_head and head is None:
+                head = code
+            elif name in want_tail and tail is None:
+                tail = code
+        self._debug_log("handles: Shot fields head=%r tail=%r" % (head, tail))
+        cache["fields"] = (head, tail)
+        return head, tail
+
+    def _cut_from_handles(self, context, first, last):
+        """(cut_in, cut_out, head, tail): the script range minus the Shot's
+        Handles Head / Handles Tail. None (reason in _cut_note) if unknown.
+        Never raises."""
+        try:
+            entity = context.entity or {}
+            if entity.get("type") != "Shot" or not entity.get("id"):
+                self._cut_note = "not marked - not a Shot context"
+                return None
+            head_f, tail_f = self._handle_fields()
+            if not head_f or not tail_f:
+                self._cut_note = (
+                    "not marked - no %s / %s field found on Shot"
+                    % (SG_HANDLES_HEAD_NAMES[0], SG_HANDLES_TAIL_NAMES[0]))
+                return None
+            shot = self.parent.shotgun.find_one(
+                "Shot", [["id", "is", entity["id"]]], [head_f, tail_f]) or {}
+            head, tail = shot.get(head_f), shot.get(tail_f)
+            if head in (None, "") or tail in (None, ""):
+                self._cut_note = "not marked - Handles Head/Tail empty on Flow"
+                return None
+            head, tail = int(float(head)), int(float(tail))
+            cut_in, cut_out = first + head, last - tail
+            if head < 0 or tail < 0 or cut_out < cut_in:
+                self._cut_note = (
+                    "not marked - handles %d/%d do not fit range %d-%d"
+                    % (head, tail, first, last))
+                return None
+            self._cut_note = "%d-%d  (handles %d head / %d tail)" % (
+                cut_in, cut_out, head, tail)
+            return cut_in, cut_out, head, tail
+        except Exception as exc:
+            self._cut_note = "not marked - error: %s" % exc
+            return None
+        finally:
+            self._debug_log("cut: %s for %s" % (self._cut_note, context))
+
+    def _apply_cut_marks(self, near=None):
+        """Lock every Viewer's in/out to the cut and write/update the
+        CutInfo sticky note (moved beside `near` when given). Never raises."""
+        cut = getattr(self, "_cut", None)
+        if not cut:
+            return
+        cut_in, cut_out, head, tail = cut
+        try:
+            with nuke.root():
+                for viewer in nuke.allNodes("Viewer"):
+                    try:
+                        viewer["frame_range"].setValue("%d-%d" % (cut_in, cut_out))
+                        viewer["frame_range_lock"].setValue(True)
+                    except Exception as exc:
+                        self._debug_log("cut: Viewer in/out failed on %s: %r"
+                                        % (viewer.name(), exc))
+                note = nuke.toNode(CUT_NOTE_NAME)
+                if note is None:
+                    note = nuke.nodes.StickyNote(name=CUT_NOTE_NAME)
+                root = nuke.root()
+                note["label"].setValue(
+                    "CUT  %d - %d\nhandles  %d head / %d tail\nscript  %d - %d"
+                    % (cut_in, cut_out, head, tail,
+                       int(root["first_frame"].value()),
+                       int(root["last_frame"].value())))
+                try:
+                    note["note_font_size"].setValue(24)
+                except Exception:
+                    pass
+                if near is not None:
+                    note.setXYpos(near.xpos() + 200, near.ypos())
+        except Exception as exc:
+            self._debug_log("cut: marking failed: %r" % exc)
+
+    # STUDIO_NEWFILE_REGRAIN_QC_2026_10_28
+    @staticmethod
+    def _dasgrain_path():
+        """repo/installers/nuke/DasGrain.nk, found relative to this hook
+        (<repo>/pipeline/config/flow/current/config/hooks)."""
+        root = os.environ.get("BUF_NUKE_SHARED_TOOLS")
+        if not root:
+            repo = os.path.dirname(os.path.abspath(__file__))
+            for _ in range(6):
+                repo = os.path.dirname(repo)
+            root = os.path.join(repo, "installers", "nuke")
+        return os.path.normpath(os.path.join(root, DASGRAIN_FILE_NAME))
+
+    def _paste_dasgrain(self):
+        """Paste DasGrain.nk, keep only the DasGrain group. None if missing."""
+        path = self._dasgrain_path()
+        if not os.path.isfile(path):
+            self._regrain_note = "NOT ADDED - %s not found" % path
+            return None
+        for node in nuke.selectedNodes():
+            node.setSelected(False)
+        before = set(n.name() for n in nuke.allNodes())
+        nuke.nodePaste(path.replace("\\", "/"))
+        pasted = [n for n in nuke.allNodes() if n.name() not in before]
+        dasgrain = None
+        for node in pasted:
+            if (dasgrain is None and node.Class() == "Group"
+                    and node.name().startswith(DASGRAIN_GROUP_PREFIX)):
+                dasgrain = node
+        for node in pasted:
+            if node is not dasgrain:
+                nuke.delete(node)
+        for node in nuke.allNodes():
+            node.setSelected(False)
+        if dasgrain is None:
+            self._regrain_note = "NOT ADDED - no DasGrain group in %s" % path
+        return dasgrain
+
+    def _build_regrain(self, read_plates, comp_in, x_main, y, y_step):
+        """DasGrain on the main line at (x_main, y), disabled, with its PLATE
+        input piped from the plate Read through a backdrop box offset to the
+        right. Returns the node the "to Write" Dot should take - DasGrain, or
+        comp_in if it could not be added. Never raises."""
+        self._regrain_note = "not added"
+        try:
+            dasgrain = self._paste_dasgrain()
+            if dasgrain is None:
+                self._debug_log("regrain: %s" % self._regrain_note)
+                return comp_in
+            dasgrain.setInput(0, comp_in)
+            dasgrain["disable"].setValue(True)
+            dasgrain["label"].setValue(
+                "DISABLED until set up:\n"
+                "1. connect degrained plate (input 2)\n"
+                "2. Analyze   3. enable")
+            dasgrain.setXYpos(x_main, y)
+
+            x_box = x_main + 450
+            y_top = read_plates.ypos()
+            plate_tap = nuke.nodes.Dot(label="plate -> DasGrain PLATE")
+            plate_tap.setInput(0, read_plates)
+            plate_tap.setXYpos(x_box + 34, y_top + 40)
+            plate_in = nuke.nodes.Dot()
+            plate_in.setInput(0, plate_tap)
+            plate_in.setXYpos(x_box + 34, y + 4)
+            dasgrain.setInput(1, plate_in)
+
+            note = nuke.nodes.StickyNote(
+                label="DEGRAINED PLATE\nput it here and connect to\n"
+                      "DasGrain input 2 (DEGRAINED_PLATE)")
+            note.setXYpos(x_box + 120, y - y_step)
+
+            backdrop = nuke.nodes.BackdropNode(
+                label="REGRAIN - DasGrain (disabled)",
+                note_font_size=24,
+                tile_color=0x3D4A5AFF,
+                bdwidth=480,
+                bdheight=(y - y_top) + 160,
+            )
+            backdrop.setXYpos(x_box - 60, y_top - 60)
+
+            self._regrain_note = (
+                "%s added DISABLED - PLATE wired; connect the degrained plate "
+                "(input 2), Analyze, then enable" % dasgrain.name())
+            self._debug_log("regrain: %s" % self._regrain_note)
+            return dasgrain
+        except Exception as exc:
+            self._regrain_note = "NOT ADDED - error: %s" % exc
+            self._debug_log("regrain failed: %r" % exc)
+            return comp_in
+
+    def _build_difference_qc(self, plate_src, comp_src, x):
+        """Difference of comp vs plate, off the render path. Never raises."""
+        self._qc_note = "not added"
+        try:
+            tap = nuke.nodes.Dot(label="plate (QC)")
+            tap.setInput(0, plate_src)
+            tap.setXYpos(x + 34, plate_src.ypos())
+            diff = nuke.nodes.Difference(
+                label="QC: comp vs plate\n(not rendered)")
+            diff.setInput(0, comp_src)
+            diff.setInput(1, tap)
+            diff.setXYpos(x, comp_src.ypos())
+            self._qc_note = "%s: comp vs plate (alpha), not in the render path" % diff.name()
+        except Exception as exc:
+            self._qc_note = "NOT ADDED - error: %s" % exc
+            self._debug_log("difference QC failed: %r" % exc)
+
+    def _regrain_summary(self):
+        return getattr(self, "_regrain_note", "not added")
+
+    def _qc_summary(self):
+        return getattr(self, "_qc_note", "not added")
+
+    def _cut_summary(self):
+        return getattr(self, "_cut_note", "not marked")
 
     def _frame_range_summary(self):
         return getattr(self, "_frame_range_note", "unchanged (Nuke default)")
@@ -711,7 +948,6 @@ class SceneOperation(HookClass):
 
         # ── Layout constants ──────────────────────────────────────────────
         x0, y0  = 0, 0
-        x_vfx   = 300
         x_extra = -300
         x_main  = 0
         y_step  = 130
@@ -762,26 +998,17 @@ class SceneOperation(HookClass):
         dot_working["label"].setValue("ACEScg working")
         dot_working.setXYpos(x_main + 34, y)
 
-        # ── Read: VFX pull placeholder (raw, already ACEScg) ─────────────
-        read_vfx = nuke.createNode("Read", inpanel=False)
-        read_vfx["file"].setValue("REPLACE_WITH_VFX_PULL_PATH.####.exr")
-        read_vfx["raw"].setValue(True)
-        read_vfx["colorspace"].setValue("raw")
-        read_vfx["label"].setValue("VFX PULL\n(raw ACEScg — no conversion)\n[value file]")
-        read_vfx.setXYpos(x_vfx, y - y_step)
+        # STUDIO_NO_VFX_PULL_READ_2026_10_28: no VFX PULL placeholder Read / Merge any more.
 
-        # ── Merge: plates + VFX in ACEScg ────────────────────────────────
-        y += y_step
-        merge = nuke.createNode("Merge2", inpanel=False)
-        merge.setInput(0, dot_working)
-        merge.setInput(1, read_vfx)
-        merge["label"].setValue("Working: ACEScg")
-        merge.setXYpos(x_main, y)
+        # ── Regrain: DasGrain after the comp area (STUDIO_NEWFILE_REGRAIN_QC_2026_10_28) ──
+        # Two steps of empty space below "ACEScg working" for the comp.
+        y += y_step * 2
+        comp_out = self._build_regrain(read_plates, dot_working, x_main, y, y_step)
 
         # ── Dot: to Write ─────────────────────────────────────────────────
         y += y_step
         dot_write = nuke.createNode("Dot", inpanel=False)
-        dot_write.setInput(0, merge)
+        dot_write.setInput(0, comp_out)
         dot_write["label"].setValue("to Write")
         dot_write.setXYpos(x_main + 34, y)
 
@@ -863,6 +1090,8 @@ class SceneOperation(HookClass):
         viewer.setInput(0, dot_write)
         viewer["label"].setValue("Display via OCIO viewer LUT")
         viewer.setXYpos(x_main, y)
+        self._apply_cut_marks(near=write)  # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+        self._build_difference_qc(dot_working, dot_write, x_main - 300)  # STUDIO_NEWFILE_REGRAIN_QC_2026_10_28
 
         plate_summary = (
             "\n".join(
@@ -879,16 +1108,18 @@ class SceneOperation(HookClass):
         nuke.message(
             "Color pipeline loaded for %s.\n\n"
             "Working space : ACEScg\n\n"
-            "Frame range   : %s\n\n"
+            "Frame range   : %s\n"
+            "Cut (Viewer in/out) : %s\n\n"
             "Plates (plates/, assumed ACEScg linear, raw — no conversion):\n%s\n\n"
-            "VFX Pulls : Replace path in VFX PULL Read node\n"
-            "  → raw read, already ACEScg — no conversion needed\n\n"
             "Write node : EXR in ACEScg linear — no color baked in\n"
             "  → %s\n"
             "  → preset: %s (Step-based default)\n\n"
+            "Regrain (DasGrain) : %s\n"
+            "QC (Difference)    : %s\n\n"
             "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
-            % (shot, self._frame_range_summary(), plate_summary, render_path,
-               write_preset)
+            % (shot, self._frame_range_summary(), self._cut_summary(),
+               plate_summary, render_path,
+               write_preset, self._regrain_summary(), self._qc_summary())
         )

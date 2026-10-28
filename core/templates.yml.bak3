@@ -1,0 +1,617 @@
+# Copyright (c) 2015 Shotgun Software Inc.
+#
+# CONFIDENTIAL AND PROPRIETARY
+#
+# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit
+# Source Code License included in this distribution package. See LICENSE.
+# By accessing, using, copying or modifying this work you indicate your
+# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
+# not expressly granted therein are reserved by Shotgun Software Inc.
+
+keys:
+    Sequence:
+        type: str
+    Episode:
+        type: str
+    Scene:
+        type: str
+    Shot:
+        type: str
+    Step:
+        type: str
+    sg_asset_type:
+        type: str
+    Asset:
+        type: str
+    name:
+        type: str
+        filter_by: alphanumeric
+    iteration:
+        type: int
+    version:
+        type: int
+        format_spec: "03"
+    version_four:
+       type: int
+       format_spec: "04"
+       alias: version
+    timestamp:
+        type: str
+    width:
+        type: int
+    height:
+        type: int
+    segment_name:
+        type: str
+    nuke.output:
+        alias: output
+        type: str
+        filter_by: alphanumeric
+    blender.output:
+        alias: output
+        type: str
+        filter_by: alphanumeric
+    # Optional "_temp" tag on Blender element renders made with the add-on's
+    # Temp quality preset (2026-09-26). Absent = Final. Alias "quality" is the
+    # name the fields dict must use (same alias quirk as blender.output).
+    blender.quality:
+        alias: quality
+        type: str
+        choices: [temp]
+    afx.comp:
+        alias: comp
+        type: str
+        filter_by: alphanumeric
+    afx.mov.ext:
+        alias: extension
+        type: str
+        choices:
+            mov: Quicktime Movie (.mov)
+            avi: Audio Video Interleaved (.avi)
+    SEQ:
+        type: sequence
+        format_spec: "04"
+    flame.frame:
+        type: sequence
+        format_spec: "08"
+    eye:
+        type: str
+    nuke_extension:
+        type: str
+        choices:
+            nk: Nuke Script (.nk)
+            nknc: Nuke Non-Commercial (.nknc)
+        default: nk
+    # Per-shot LUT format (see ep_shot_lut). .cube is a 3D lattice and can
+    # carry a full creative look; OCIO maps .lut to either "Discreet 1D LUT"
+    # or "houdini", and the Discreet variant is 1D only. qt_bake_oiio.py
+    # prefers .cube when a shot has both.
+    lut_extension:
+        type: str
+        choices:
+            cube: Iridas / Resolve Cube LUT (.cube)
+            lut: Houdini or Discreet LUT (.lut)
+        default: cube
+    maya_extension:
+        type: str
+        choices:
+            ma: Maya ASCII (.ma)
+            mb: Maya Binary (.mb)
+        default: ma
+        alias: extension
+    img_extension:
+        type: str
+        choices:
+            exr: OpenEXR (.exr)
+            png: PNG (.png)
+            jpg: JPEG (.jpg)
+            dpx: DPX (.dpx)
+    houdini.node:
+        alias: node
+        type: str
+    aov_name:
+        type: str
+    YYYY:
+        type: int
+        format_spec: "04"
+    MM:
+        type: int
+        format_spec: "02"
+    DD:
+        type: int
+        format_spec: "02"
+        alias: DD
+    project:
+        type: str
+    UDIM:
+        type: sequence
+        default: "<UDIM>"
+    mari.channel:
+        type: str
+        alias: channel
+    mari.layer:
+        type: str
+        alias: layer
+    mari.project_name:
+        type: str
+        alias: name
+    asset_name:
+        type: str
+        shotgun_entity_type: Asset
+        shotgun_field_name: code
+    task_name:
+        type: str
+        shotgun_entity_type: Task
+        shotgun_field_name: content
+
+    # Original filename (no extension) of a vendor/external delivery, preserved
+    # so the raw source is traceable back to what the vendor sent.
+    original_basename:
+        type: str
+
+    # Vendor/studio code inserted into shot filenames between Shot and Step,
+    # e.g. INH_layout (in-house) vs an external vendor's own code. Defaults
+    # to INH so day-to-day in-house work never needs to set it explicitly;
+    # override per-task (e.g. via the flag/publish fields) for vendor-
+    # sourced work. {Shot} resolves to ShotGrid's Shot.code verbatim - no
+    # prefix is added here or anywhere else in the pipeline.
+    vendor_code:
+        type: str
+        default: INH
+
+    # Source format of an incoming asset delivery, prior to USD conversion.
+    ingest_extension:
+        type: str
+        choices:
+            fbx: FBX
+            obj: OBJ
+            abc: Alembic
+            gltf: glTF (JSON)
+            glb: glTF (binary)
+            max: 3ds Max
+            usd: USD
+            usdc: USD (binary)
+            usda: USD (ASCII)
+            usdz: USD (zipped)
+
+paths:
+
+    # -------------------------------------------------------------------------
+    # Path aliases
+    # -------------------------------------------------------------------------
+    shot_root: shots/{Episode}/{Scene}/{Shot}/{Step}
+    shot_base: shots/{Episode}/{Scene}/{Shot}
+    asset_root: assets/{sg_asset_type}/{Asset}
+    sequence_root: sequences/{Sequence}
+
+    ##########################################################################################
+    # Episodic shot templates  (shots/{Episode}/{Scene}/{Shot}/{Step})
+    ##########################################################################################
+
+    # ── Nuke ─────────────────────────────────────────────────────────────────
+    shot_work_area_nuke:
+        definition: '@shot_root/nuke/work'
+    shot_publish_area_nuke:
+        definition: '@shot_root/nuke/publish'
+
+    ep_nuke_shot_work:
+        definition: '@shot_root/nuke/work/{Shot}_{vendor_code}_{Step}_v{version}.{nuke_extension}'
+    ep_nuke_shot_publish:
+        definition: '@shot_root/nuke/publish/{Shot}_{vendor_code}_{Step}_v{version}.{nuke_extension}'
+
+    ep_nuke_shot_snapshot:
+        definition: '@shot_root/nuke/work/snapshots/{Shot}_{vendor_code}_{Step}_v{version}_{timestamp}.{nuke_extension}'
+
+    # ── Maya ─────────────────────────────────────────────────────────────────
+    shot_work_area_maya:
+        definition: '@shot_root/maya/work'
+    shot_publish_area_maya:
+        definition: '@shot_root/maya/publish'
+
+    ep_maya_shot_work:
+        definition: '@shot_root/maya/work/{Shot}_{vendor_code}_{Step}_v{version}.{maya_extension}'
+    ep_maya_shot_publish:
+        definition: '@shot_root/maya/publish/{Shot}_{vendor_code}_{Step}_v{version}.{maya_extension}'
+
+    ep_maya_shot_snapshot:
+        definition: '@shot_root/maya/work/snapshots/{Shot}_{vendor_code}_{Step}_v{version}_{timestamp}.{maya_extension}'
+
+    # ── Blender ──────────────────────────────────────────────────────────────
+    shot_work_area_blender:
+        definition: '@shot_root/blender/work'
+    shot_publish_area_blender:
+        definition: '@shot_root/blender/publish'
+
+    # NOTE: unlike Maya/Nuke, Blender work/publish files get their own
+    # per-version subfolder. Blender's linked/appended libraries resolve by
+    # relative path, so multiple versions sharing one folder risks a newer
+    # save silently breaking an older version's links. This matches the
+    # pattern used by the reference tk-blender engine config.
+    ep_blender_shot_work:
+        definition: '@shot_root/blender/work/{Shot}_{vendor_code}_{Step}_v{version}/{Shot}_{vendor_code}_{Step}_v{version}.blend'
+    ep_blender_shot_publish:
+        definition: '@shot_root/blender/publish/{Shot}_{vendor_code}_{Step}_v{version}/{Shot}_{vendor_code}_{Step}_v{version}.blend'
+
+    ep_blender_shot_snapshot:
+        definition: '@shot_root/blender/work/snapshots/{Shot}_{vendor_code}_{Step}_v{version}/{Shot}_{vendor_code}_{Step}_v{version}_{timestamp}.blend'
+
+    # ── Renders (shot level) ──────────────────────────────────────────────────
+    ep_nuke_shot_render_work:
+        definition: '@shot_base/render/work/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.{SEQ}.exr'
+    ep_nuke_shot_render_pub:
+        definition: '@shot_base/render/publish/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.{SEQ}.exr'
+
+    # Blender CG-element pre-renders (smoke, debris, fx passes, etc.) that get
+    # read INTO Nuke comp - not an official comp version themselves. Kept as
+    # a sibling of render/work and render/publish rather than inside either:
+    # render/work is where Nuke's own official versioned output lives, and
+    # Loader2/publish tooling treats everything under it as a comp version -
+    # mixing element pre-renders in there risks one being mistaken for the
+    # other. {blender.output} is REQUIRED (not bracketed like Nuke's
+    # [_{nuke.output}]), since every Blender element render needs a
+    # descriptive name - there's no unqualified "default" element.
+    # Precedent for a named subfolder under render/ that isn't work/publish:
+    # houdini_shot_render below already does the same thing for Houdini.
+    # No new schema folder needed for this - like Houdini's render/{name}
+    # path, it's a deeper, non-scaffolded path under the existing render/
+    # folder; disk folders get created by the render output itself.
+    ep_blender_shot_render_work:
+        definition: '@shot_base/render/elements/{Shot}_{vendor_code}_{Step}_{blender.output}[_{blender.quality}]_v{version}/{Shot}_{vendor_code}_{Step}_{blender.output}[_{blender.quality}]_v{version}.{SEQ}.exr'
+
+    # ── Review / dailies (shot level) ────────────────────────────────────────
+    ep_nuke_shot_render_movie:
+        definition: '@shot_base/review/{Shot}_{vendor_code}_{Step}_v{version}.mov'
+
+    shot_quicktime_quick:
+        definition: '@shot_base/review/{Shot}_{vendor_code}_{Step}_{iteration}.mov'
+
+    # ── Plates, CDL, LUT (shot level) ────────────────────────────────────────
+    # The plates FOLDER. Deliveries inside it are one folder per element,
+    # holding a resolution folder, holding the frames:
+    #
+    #   plates/301_001_0050_bg01_v02/4608x2592/301_001_0050_bg01_v02_1001.exr
+    #
+    # That shape is deliberately NOT templated: element naming varies by
+    # vendor (bg01 vs BG1), the _v## suffix is optional, resolution folders
+    # come and go, and non-plate folders sit in the same place. A template
+    # would describe a convention the deliveries do not keep. So the folder
+    # comes from here and hooks/plate_reads.py scans its contents - see that
+    # module's docstring.
+    ep_shot_plates_area:
+        definition: '@shot_base/plates'
+
+    # Legacy single-sequence plate path. Predates the per-element delivery
+    # layout above; matches only older shots with EXRs directly in plates/.
+    ep_shot_plates:
+        definition: '@shot_base/plates/{Shot}.####.exr'
+
+    ep_shot_cdl:
+        definition: '@shot_base/plates/{Shot}.cc'
+
+    # Per-shot LUT, delivered alongside the plates and named after the plate.
+    # qt_bake_oiio.py prefers this over the global show LUT below; the show
+    # LUT is only the fallback for shots that have no LUT of their own.
+    # Either .cube or .lut is accepted; .cube wins if a shot has both.
+    # NOTE: the bake script resolves this path itself rather than reading this
+    # template (it runs outside a Toolkit context) - keep the two in step.
+    ep_shot_lut:
+        definition: '@shot_base/plates/{Shot}.{lut_extension}'
+
+    # Fallback only. WARNING: this does not match the path hardcoded in
+    # qt_bake_oiio.py's SHOW_LUT_PATH, which points at
+    # shots/_globals/LUT/260629/s3LUT/ARRILogC4_SEV_S3_V3_digital_p1s_R709.cube
+    # - different folder AND a different filename. One of the two is stale;
+    # confirm which file actually exists before relying on either.
+    ep_shot_show_lut:
+        definition: 'color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube'
+
+
+    ##########################################################################################
+    # Project level paths
+    ##########################################################################################
+
+    hiero_project_work_area:
+        definition: 'editorial/work'
+    hiero_project_publish_area:
+        definition: 'editorial/publish'
+
+    hiero_project_work:
+        definition: 'editorial/work/{name}_v{version}.hrox'
+    hiero_project_publish:
+        definition: 'editorial/publish/{name}_v{version}.hrox'
+
+    hiero_project_snapshot:
+        definition: 'editorial/work/snapshots/{name}_v{version}_{timestamp}.hrox'
+
+
+    ##########################################################################################
+    # Shot level paths (legacy / non-episodic DCCs)
+    ##########################################################################################
+
+    #
+    # Flame
+    #
+    flame_segment_clip:
+        definition: '@shot_base/finishing/clip/sources/{segment_name}.clip'
+    flame_shot_clip:
+        definition: '@shot_base/finishing/clip/{Shot}.clip'
+    flame_shot_batch:
+        definition: '@shot_base/finishing/batch/{Shot}.v{version}.batch'
+    flame_shot_render_dpx:
+        definition: '@shot_base/finishing/renders/{segment_name}_v{version}/{Shot}_{segment_name}_v{version}.{flame.frame}.dpx'
+    flame_shot_render_exr:
+        definition: '@shot_base/finishing/renders/{segment_name}_v{version}/{Shot}_{segment_name}_v{version}.{flame.frame}.exr'
+    flame_shot_comp_dpx:
+        definition: '@shot_base/finishing/comp/{segment_name}_v{version}/{Shot}_{segment_name}_v{version}.{flame.frame}.dpx'
+    flame_shot_comp_exr:
+        definition: '@shot_base/finishing/comp/{segment_name}_v{version}/{Shot}_{segment_name}_v{version}.{flame.frame}.exr'
+
+    #
+    # After Effects
+    #
+    shot_work_area_aftereffects:
+        definition: '@shot_root/afx/work'
+    shot_publish_area_aftereffects:
+        definition: '@shot_root/afx/publish'
+
+    aftereffects_shot_work:
+        definition: '@shot_root/afx/work/{name}.v{version}.aep'
+    aftereffects_shot_publish:
+        definition: '@shot_root/afx/publish/{name}.v{version}.aep'
+
+    aftereffects_shot_snapshot:
+        definition: '@shot_root/afx/work/snapshots/{name}.v{version}.{timestamp}.aep'
+    aftereffects_shot_render_pub_mono:
+        definition: '@shot_base/render/{name}/v{version}/{width}x{height}/{Shot}_{name}_{afx.comp}_v{version}.{SEQ}.tif'
+    aftereffects_shot_render_movie:
+        definition: '@shot_base/review/{Shot}_{name}_{afx.comp}_v{version}.{afx.mov.ext}'
+
+    #
+    # Houdini
+    #
+    shot_work_area_houdini:
+        definition: '@shot_root/houdini/work'
+    shot_publish_area_houdini:
+        definition: '@shot_root/houdini/publish'
+
+    houdini_shot_work:
+        definition: '@shot_root/houdini/work/{name}.v{version}.hip'
+    houdini_shot_publish:
+        definition: '@shot_root/houdini/publish/{name}.v{version}.hip'
+
+    houdini_shot_snapshot:
+        definition: '@shot_root/houdini/work/snapshots/{name}.v{version}.{timestamp}.hip'
+    houdini_shot_work_alembic_cache:
+        definition: '@shot_root/cache/alembic/{name}/{houdini.node}/v{version}/{Shot}_{name}_v{version}.abc'
+    houdini_shot_render:
+        definition: '@shot_base/render/{name}/{houdini.node}/v{version}/{width}x{height}/{Shot}_{name}_v{version}.{SEQ}.exr'
+    houdini_shot_ifd:
+        definition: '@shot_root/ifds/{name}/{houdini.node}/v{version}/{width}x{height}/{Shot}_{name}_v{version}.{SEQ}.ifd'
+    houdini_shot_dcm:
+        definition: '@shot_root/dcms/{name}/{houdini.node}/v{version}/{width}x{height}/{Shot}_{name}_v{version}.{SEQ}.dcm'
+    houdini_shot_extra_plane:
+        definition: '@shot_base/render/{name}/{houdini.node}/{aov_name}/v{version}/{width}x{height}/{Shot}_{name}_v{version}.{SEQ}.exr'
+
+    #
+    # 3dsmax
+    #
+    shot_work_area_max:
+        definition: '@shot_root/3dsmax/work'
+    shot_publish_area_max:
+        definition: '@shot_root/3dsmax/publish'
+
+    max_shot_work:
+        definition: '@shot_root/3dsmax/work/{name}.v{version}.max'
+    max_shot_publish:
+        definition: '@shot_root/3dsmax/publish/{name}.v{version}.max'
+
+    max_shot_snapshot:
+        definition: '@shot_root/3dsmax/work/snapshots/{name}.v{version}.{timestamp}.max'
+
+    #
+    # Motionbuilder
+    #
+    shot_work_area_mobu:
+        definition: '@shot_root/mobu/work'
+    shot_publish_area_mobu:
+        definition: '@shot_root/mobu/publish'
+
+    mobu_shot_work:
+        definition: '@shot_root/mobu/work/{name}.v{version}.fbx'
+    mobu_shot_publish:
+        definition: '@shot_root/mobu/publish/{name}.v{version}.fbx'
+
+    mobu_shot_snapshot:
+        definition: '@shot_root/mobu/work/snapshots/{name}.v{version}.{timestamp}.fbx'
+
+    #
+    # Photoshop
+    #
+    shot_work_area_photoshop:
+        definition: '@shot_root/photoshop/work'
+    shot_publish_area_photoshop:
+        definition: '@shot_root/photoshop/publish'
+
+    photoshop_shot_work:
+        definition: '@shot_root/photoshop/work/{name}.v{version}.psd'
+    photoshop_shot_publish:
+        definition: '@shot_root/photoshop/publish/{name}.v{version}.psd'
+
+    photoshop_shot_snapshot:
+        definition: '@shot_root/photoshop/work/snapshots/{name}.v{version}.{timestamp}.psd'
+    photoshop_shot_png_publish:
+        definition: '@shot_root/photoshop/publish/{name}.v{version}.png'
+    photoshop_shot_jpg_publish:
+        definition: '@shot_root/photoshop/publish/{name}.v{version}.jpg'
+
+    #
+    # Nuke (legacy - non-episodic)
+    #
+    nuke_shot_work:
+        definition: '@shot_root/nuke/work/{name}.v{version}.nk'
+    nuke_shot_publish:
+        definition: '@shot_root/nuke/publish/{name}.v{version}.nk'
+
+    nuke_shot_snapshot:
+        definition: '@shot_root/nuke/work/snapshots/{name}.v{version}.{timestamp}.nk'
+    nuke_shot_render_mono_dpx:
+        definition: '@shot_base/render/work/{name}/v{version}/{width}x{height}/{Shot}_{name}_{nuke.output}_v{version}.{SEQ}.dpx'
+    nuke_shot_render_pub_mono_dpx:
+        definition: '@shot_base/render/publish/{name}/v{version}/{width}x{height}/{Shot}_{name}_{nuke.output}_v{version}.{SEQ}.dpx'
+
+    nuke_shot_render_stereo:
+        definition: '@shot_base/render/work/{name}/v{version}/{width}x{height}/{Shot}_{name}_{nuke.output}_{eye}_v{version}.{SEQ}.exr'
+    nuke_shot_render_pub_stereo:
+        definition: '@shot_base/render/publish/{name}/v{version}/{width}x{height}/{Shot}_{name}_{nuke.output}_{eye}_v{version}.{SEQ}.exr'
+
+    nuke_shot_render_movie:
+        definition: '@shot_base/review/{Shot}_{name}_{nuke.output}_v{version}.mov'
+
+    #
+    # Hiero
+    #
+    hiero_plate_path:
+        definition: '@shot_base/editorial/{YYYY}_{MM}_{DD}/plates/{project}_{Shot}.mov'
+    hiero_render_path:
+        definition: '@shot_base/editorial/{YYYY}_{MM}_{DD}/renders/{project}_{Shot}.{SEQ}.dpx'
+
+
+    ##########################################################################################
+    # Asset pipeline  (assets/{sg_asset_type}/{Asset})
+    # Simplified: no Step in path, four DCCs, single publish folder
+    ##########################################################################################
+
+    # ── Work areas ───────────────────────────────────────────────────────────
+    asset_work_area_maya:
+        definition: '@asset_root/work/maya'
+    asset_work_area_blender:
+        definition: '@asset_root/work/blender'
+    asset_work_area_nuke:
+        definition: '@asset_root/work/nuke'
+    asset_work_area_unreal:
+        definition: '@asset_root/work/unreal'
+
+    # ── Publish area (single shared folder) ──────────────────────────────────
+    asset_publish_area:
+        definition: '@asset_root/publish'
+
+    # ── Source (scans, purchased assets) ─────────────────────────────────────
+    asset_source_area:
+        definition: '@asset_root/source'
+
+    # ── Maya ─────────────────────────────────────────────────────────────────
+    maya_asset_work:
+        definition: '@asset_root/work/maya/{Asset}_{name}_v{version}.{maya_extension}'
+    maya_asset_publish:
+        definition: '@asset_root/publish/{Asset}_{name}_v{version}.{maya_extension}'
+    maya_asset_snapshot:
+        definition: '@asset_root/work/maya/snapshots/{Asset}_{name}_v{version}_{timestamp}.{maya_extension}'
+
+    # ── Blender ───────────────────────────────────────────────────────────────
+    blender_asset_work:
+        definition: '@asset_root/work/blender/{Asset}_{name}_v{version}.blend'
+    blender_asset_publish:
+        definition: '@asset_root/publish/{Asset}_{name}_v{version}.blend'
+    blender_asset_snapshot:
+        definition: '@asset_root/work/blender/snapshots/{Asset}_{name}_v{version}_{timestamp}.blend'
+
+    # ── Nuke ─────────────────────────────────────────────────────────────────
+    nuke_asset_work:
+        definition: '@asset_root/work/nuke/{Asset}_{name}_v{version}.{nuke_extension}'
+    nuke_asset_publish:
+        definition: '@asset_root/publish/{Asset}_{name}_v{version}.{nuke_extension}'
+    nuke_asset_snapshot:
+        definition: '@asset_root/work/nuke/snapshots/{Asset}_{name}_v{version}_{timestamp}.{nuke_extension}'
+
+    nuke_asset_render:
+        definition: '@asset_root/work/images/{name}/v{version}/{width}x{height}/{Asset}_{name}_{nuke.output}_v{version}.{SEQ}.exr'
+    nuke_asset_render_pub:
+        definition: '@asset_root/publish/images/{name}/v{version}/{width}x{height}/{Asset}_{name}_{nuke.output}_v{version}.{SEQ}.exr'
+    nuke_asset_render_movie:
+        definition: '@asset_root/review/{Asset}_{name}_{nuke.output}_v{version}.mov'
+
+    # ── Unreal ────────────────────────────────────────────────────────────────
+    unreal_asset_work:
+        definition: '@asset_root/work/unreal/{Asset}_{name}_v{version}'
+
+    # Turntable EXR render output (Unreal -> qt_watcher -> Nuke bake)
+    unreal_asset_turntable_render:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/{Asset}_turntable_v{version}.{SEQ}.exr'
+
+    # Render-complete flag JSON picked up by qt_watcher
+    unreal_asset_turntable_flag:
+        definition: '@asset_root/render/work/{Asset}_turntable_v{version}/.render_complete_{Asset}_turntable_v{version}.json'
+
+    # Final baked QT (written by qt_bake_slate_burnin.py)
+    unreal_asset_turntable_movie:
+        definition: '@asset_root/review/{Asset}_turntable_v{version}.mov'
+
+    # FBX exports for Unreal loading (from Maya asset publishes)
+    unreal_maya_asset_fbx_publish:
+        definition: '@asset_root/publish/fbx/{name}.v{version}.fbx'
+
+    # Turntable review renders from Unreal (Maya asset pipeline)
+    unreal_maya_turntable_render:
+        definition: '@asset_root/work/images/{name}_turntable_v{version}.mov'
+    unreal_maya_turntable_publish:
+        definition: '@asset_root/review/{Asset}_{name}_turntable_v{version}.mov'
+
+    # Generic asset export from Unreal
+    unreal_asset_publish:
+        definition: 'assets/unreal/exports/{YYYY}_{MM}_{DD}/{name}.fbx'
+
+    # ── Review ────────────────────────────────────────────────────────────────
+    asset_quicktime_quick:
+        definition: '@asset_root/review/{Asset}_{name}_{iteration}.mov'
+
+    # ── Alembic cache ─────────────────────────────────────────────────────────
+    asset_alembic_cache:
+        definition: '@asset_root/publish/caches/{Asset}_{name}_v{version}.abc'
+
+
+
+    # ── QT Review Pipeline ───────────────────────────────────────────────────
+    show_logo:
+        # UNUSED BY THIS CONFIG as of 2026-08-19 -- nothing in FlowTrackingConfig
+        # resolves this template. Kept in sync with reality so it isn't
+        # misleading, but EDITING IT DOES NOT CHANGE THE SLATE.
+        #
+        # The slate logo is hardcoded in qt_bake_oiio.py (BUF_Mac_watcher) as
+        # LOGO_PATH = .../shots/_globals/logo/teardrop_blk1.png -- change it
+        # THERE. Note that script guards with os.path.exists() and silently
+        # renders an unbranded slate if the file is missing, so a bad path
+        # here fails quietly rather than loudly.
+        #
+        # Was 'shots/GLOBALS/logo/teardrop.png' -- that folder does not exist;
+        # the _globals convention (see LUT paths above) is correct.
+        # Folder contains teardrop.png, teardrop_blk.png, teardrop_blk1.png;
+        # only _blk1 is world-readable and only _blk1 is the one in use.
+        definition: 'shots/_globals/logo/teardrop_blk1.png'
+
+    ep_nuke_shot_render_flag:
+        definition: '@shot_base/render/work/{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}/.render_complete_{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.json'
+
+  # Raw, untouched vendor/downloaded file -- lands in the EXISTING
+  # asset_source_area ('raw scans, purchased assets, original deliverables'),
+  # not a new folder.
+    asset_ingest_source_file:
+        definition: '@asset_source_area/{original_basename}.{ingest_extension}'
+
+  # Converted, pipeline-standard USD -- lands in the EXISTING shared
+  # asset_publish_area, named consistently with maya_asset_publish /
+  # blender_asset_publish's "{Asset}_{name}_v{version}.{ext}" pattern.
+    asset_usd_publish_file:
+        definition: '@asset_publish_area/{Asset}_ingest_v{version}.usd'
+
+strings:
+    nuke_shot_version_name: "{Shot}_{vendor_code}_{Step}[_{nuke.output}]_v{version}.{iteration}"
+    nuke_quick_shot_version_name: "{Shot}_{vendor_code}_{Step}_quick_{iteration}"
+    nuke_asset_version_name: "{Asset}_{name}_{nuke.output}_v{version}.{iteration}"
+    nuke_quick_asset_version_name: "{Asset}_{name}_quick_{iteration}"
+    hiero_version: "{version}"
+    mari_asset_project_name: "{mari.project_name} - Asset {asset_name}, {task_name}"
+
+
+
+
+

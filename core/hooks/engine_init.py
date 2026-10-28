@@ -12,7 +12,7 @@ automatically when Workfiles2 creates the first version of a shot's script
 too, for a plate that landed after the script was made.
 
 hooks/ is not on sys.path for a core hook, so plate_reads.py is imported by
-file path the same way post_engine_init_register_render_callback.py does it.
+file path (importlib.util.spec_from_file_location), as below.
 
 Anything that fails here is logged and swallowed: a missing menu command is
 an inconvenience, an engine that will not start is a stopped artist.

@@ -153,67 +153,85 @@ nuke.knobDefault("Root.fps", _STUDIO_FPS)
 _STUDIO_VIEWER_DISPLAY = "Rec.1886 Rec.709 - Display"
 _STUDIO_VIEWER_VIEW = "Raw"
 
-_REC709_VIEWER_PROCESS_CACHE = {}
+# STUDIO_VIEWER_DEFAULT_FIX_2026_10_28
+# Why Raw did not stick (found 2026-10-28): the old code resolved the
+# viewerProcess name once per session, from a temporary Viewer made inside
+# the Root's creation at Nuke start-up - before the studio OCIO config had
+# loaded - and CACHED the miss, so it never retried and never set anything.
+# Now the name is read off the Viewer being set, only a match is cached, and
+# every Viewer is set as it is created (onCreate) as well as on script open.
+_VIEWER_PROCESS_CACHE = {}
 
 
-def _find_rec709_viewer_process(config_path):
-    """Return the viewerProcess value for the Rec.709 ACES SDR Output
-    Transform under the given OCIO config, or None if no single match is
-    found. Cached per config path so this only touches the node graph once
-    per distinct config per Nuke session."""
-    if config_path in _REC709_VIEWER_PROCESS_CACHE:
-        return _REC709_VIEWER_PROCESS_CACHE[config_path]
-
-    existing_viewers = nuke.allNodes("Viewer")
-    was_modified = nuke.root().modified()
-    tmp_viewer = None
-    try:
-        viewer = existing_viewers[0] if existing_viewers else nuke.nodes.Viewer()
-        if not existing_viewers:
-            tmp_viewer = viewer
-        try:
-            choices = list(viewer["viewerProcess"].values())
-        except Exception as exc:
-            nuke.tprint(
-                "[studio-color-defaults] Could not read viewerProcess "
-                "choices for %s: %s" % (config_path, exc)
-            )
-            _REC709_VIEWER_PROCESS_CACHE[config_path] = None
-            return None
-    finally:
-        if tmp_viewer is not None:
-            nuke.delete(tmp_viewer)
-        nuke.root().setModified(was_modified)
-
-    # Exact display + view match. Nuke spells the value either
-    # "Raw (Rec.1886 Rec.709 - Display)" or "Rec.1886 Rec.709 - Display/Raw";
-    # stripping the display name and the punctuation leaves the view.
-    candidates = [
+def _match_studio_viewer_process(choices):
+    """Values in choices that are exactly _STUDIO_VIEWER_VIEW on
+    _STUDIO_VIEWER_DISPLAY. Nuke spells them either
+    "Raw (Rec.1886 Rec.709 - Display)" or "Rec.1886 Rec.709 - Display/Raw";
+    stripping the display name and the punctuation leaves the view."""
+    return [
         c for c in choices
         if _STUDIO_VIEWER_DISPLAY in c
         and c.replace(_STUDIO_VIEWER_DISPLAY, "").strip(" ()/") == _STUDIO_VIEWER_VIEW
     ]
+
+
+def _studio_viewer_process(viewer):
+    """The viewerProcess value to use, read off this Viewer's own knob.
+    None (logged, NOT cached - retried on the next Viewer) if no match."""
+    cached = _VIEWER_PROCESS_CACHE.get(_STUDIO_OCIO_CONFIG_PATH)
+    if cached:
+        return cached
+    try:
+        choices = list(viewer["viewerProcess"].values())
+    except Exception as exc:
+        nuke.tprint(
+            "[studio-color-defaults] Could not read viewerProcess choices "
+            "on %s: %s" % (viewer.name(), exc))
+        return None
+    candidates = _match_studio_viewer_process(choices)
     if not candidates:
         nuke.tprint(
-            "[studio-color-defaults] WARNING: no viewerProcess choice "
-            "matched %s (%s) for %s. Leaving "
-            "Viewer default untouched. Available choices: %s"
-            % (_STUDIO_VIEWER_VIEW, _STUDIO_VIEWER_DISPLAY, config_path, choices)
-        )
-        result = None
-    else:
-        if len(candidates) > 1:
-            nuke.tprint(
-                "[studio-color-defaults] WARNING: %d viewerProcess choices "
-                "matched %s (%s) for %s, using the first: %s"
-                % (len(candidates), _STUDIO_VIEWER_VIEW,
-                   _STUDIO_VIEWER_DISPLAY, config_path, candidates)
-            )
-        result = candidates[0]
-        nuke.tprint("[studio-color-defaults] Viewer default -> %r" % (result,))
-
-    _REC709_VIEWER_PROCESS_CACHE[config_path] = result
+            "[studio-color-defaults] WARNING: no viewerProcess choice on %s "
+            "matched %s (%s) - will retry on the next Viewer. Available "
+            "choices: %s" % (viewer.name(), _STUDIO_VIEWER_VIEW,
+                             _STUDIO_VIEWER_DISPLAY, choices))
+        return None
+    if len(candidates) > 1:
+        nuke.tprint(
+            "[studio-color-defaults] WARNING: %d viewerProcess choices "
+            "matched %s (%s), using the first: %s"
+            % (len(candidates), _STUDIO_VIEWER_VIEW,
+               _STUDIO_VIEWER_DISPLAY, candidates))
+    result = candidates[0]
+    _VIEWER_PROCESS_CACHE[_STUDIO_OCIO_CONFIG_PATH] = result
+    nuke.knobDefault("Viewer.viewerProcess", result)
+    nuke.tprint("[studio-color-defaults] Viewer default -> %r" % (result,))
     return result
+
+
+def _set_studio_viewer(viewer):
+    value = _studio_viewer_process(viewer)
+    if value is None:
+        return
+    knob = viewer["viewerProcess"]
+    if knob.value() == value:
+        return
+    try:
+        nuke.tprint(
+            "[studio-color-defaults] %s.viewerProcess: %r -> %r"
+            % (viewer.name(), knob.value(), value))
+        knob.setValue(value)
+    except Exception as exc:
+        nuke.tprint(
+            "[studio-color-defaults] Could not set %s.viewerProcess to %r: %s"
+            % (viewer.name(), value, exc))
+
+
+def _on_viewer_created():
+    try:
+        _set_studio_viewer(nuke.thisNode())
+    except Exception as exc:
+        nuke.tprint("[studio-color-defaults] Viewer onCreate failed: %s" % exc)
 
 
 def _apply_studio_color_defaults():
@@ -233,22 +251,12 @@ def _apply_studio_color_defaults():
             )
             knob.setValue(target_value)
 
-    viewer_process = _find_rec709_viewer_process(_STUDIO_OCIO_CONFIG_PATH)
-    if viewer_process is None:
-        return
-
-    nuke.knobDefault("Viewer.viewerProcess", viewer_process)
     for viewer in nuke.allNodes("Viewer"):
-        knob = viewer["viewerProcess"]
-        if knob.value() != viewer_process:
-            nuke.tprint(
-                "[studio-color-defaults] %s.viewerProcess: %r -> %r"
-                % (viewer.name(), knob.value(), viewer_process)
-            )
-            knob.setValue(viewer_process)
+        _set_studio_viewer(viewer)
 
 
 nuke.addOnScriptLoad(_apply_studio_color_defaults)
+nuke.addOnCreate(_on_viewer_created, nodeClass="Viewer")
 
 # (label, haperture_mm, vaperture_mm)
 # Labels follow Nuke's built-in "Vendor/Model …" naming.

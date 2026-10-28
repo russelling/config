@@ -1,0 +1,1012 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+scene_operation hook for tk-multi-workfiles2 / tk-nuke (episodic context).
+
+Auto-versioning: on 'new' and 'version_up', scans the work area for existing
+v### files and saves to the next available version.
+File naming: 301_001_010_temp_v001.nk
+
+Color pipeline (first open only):
+  Builds a working node graph with:
+    - One raw Read node per EXR sequence found on disk in the shot's
+      plates/ folder (scanned at build time - see _scan_plate_sequences).
+      Plates are assumed to already be scene-linear ACEScg (per the
+      ingest/plates contract - see CLAUDE_INSTRUCTIONS.md), so no color
+      transform is applied to them; the largest sequence found is wired
+      in as the primary plate, any others are added alongside, unwired,
+      for the artist to hook up manually.
+    - Dot (labelled "ACEScg working") off the primary plate Read
+    - Merge2 <- Read node for VFX pull placeholder (raw, ACEScg)
+    - Dot (labelled "to Write")
+    - Write node (EXR, raw/ACEScg, no bake)
+    - Viewer (OCIO display transform handles LogC4->CDL->LUT->Rec.709)
+
+  Artists work in ACEScg. The viewer LUT handles display.
+  EXR renders are output in ACEScg linear - no color baked in.
+  Review QTs are generated externally from the EXR renders.
+
+  NOTE (2026-08-13): this used to also build a single hardcoded "CAMERA
+  PLATES" Read node (from the ep_shot_plates template) feeding an
+  OCIOColorSpace LogC4->ACEScg conversion. That's gone - plates are now
+  assumed to land already-converted to ACEScg linear EXR, and the plates/
+  folder is scanned directly instead of assuming one fixed filename
+  pattern, since a shot's plates/ folder can hold more than one sequence
+  (multiple takes/passes). If that assumption ever stops being true,
+  the color-convert step needs to come back here (or upstream of it).
+
+Working-directory behavior:
+  Nuke's root 'project_directory' knob is pointed at the shot's folder
+  (shots/{Episode}/{Scene}/{Shot} - the `shot_base` template) any time a
+  script is opened, created, or saved-as for a shot context. This makes
+  Read/Write file browsers (and any relative paths) default into the
+  shot's own folders (plates/, render/, review/, reference/...) instead
+  of wherever the artist last happened to browse.
+
+First-launch reliability (ROOT CAUSE FOUND 2026-09-26):
+  "New File had to be clicked twice" was not a timing race. In
+  tk-multi-workfiles2 v0.16.2, NewFileAction.execute() runs
+  reset -> prepare_new -> change_context, in that order, through the
+  Workfiles2 instance of the environment Nuke is CURRENTLY in. Nuke from
+  Desktop starts in the project environment, whose Workfiles2 had no
+  hook_scene_operation, so the app's stock hook ran prepare_new (a no-op) and
+  the script stayed blank; the second New File worked only because the engine
+  was by then in the shot context. Now every Nuke Workfiles2 instance uses
+  this hook, and prepare_new switches the engine into the target shot
+  context itself before saving and building (_ensure_engine_context), so
+  tk-nuke-writenode is loaded when the WriteTank is made. Workfiles2 then
+  sees the contexts already match and skips its own switch.
+  The writenode retry and the traceback-to-scene_op_debug.log wrapper stay
+  as belt and braces.
+
+OCIO config: ACES 1.3
+Update OCIO_CAMERA_INPUT to match your camera:
+  ARRI LogC4  : "Input - ARRI - Curve - LogC4 - EI800"
+  ARRI LogC3  : "Input - ARRI - Curve - LogC3 - EI800"
+  RED Log3G10 : "Input - RED - Curve - Log3G10"
+  Sony SLog3  : "Input - Sony - Curve - SLog3 - SGamut3"
+  (Only relevant if a camera-log color-convert step is ever reinstated
+  above the plates Read nodes - see the NOTE above.)
+"""
+
+import os
+import re
+import glob
+import time
+
+import nuke
+import sgtk
+
+# ---------------------------------------------------------------------------
+# Send to Review button wiring
+#
+# Adds a manual "Send to Review" button knob to each WriteTank node. The
+# artist renders EXRs, reviews them, and clicks the button on the node that
+# produced them to write a review flag JSON for the Mac Studio watcher.
+#
+# HISTORY (2026-06-17): we first tried to trigger the review flag
+# automatically after render via the WriteTank gizmo's tk_after_render knob
+# (read by tk-nuke-writenode v1.7.2 handler.py on_after_render_gizmo_callback,
+# which runs the knob value through exec()). That path proved unreliable in
+# practice and was abandoned in favor of this explicit button, which is
+# strictly better here: it only runs when the artist intends it, runs in the
+# node's own context (so nuke.thisNode() is the right node), and a human is
+# present when it executes. A PyScript_Knob button is the correct use of a
+# custom knob on this node - unlike the afterRender field, which fought us.
+#
+# The button is added by config hook code (here), NOT by editing the gizmo
+# definition in install/, so it is tracked in git and survives
+# `tank cache_apps` without a manual reapply step.
+# ---------------------------------------------------------------------------
+try:
+    import os as _os, sys as _sys
+    _hooks_dir = _os.path.dirname(_os.path.abspath(__file__))
+    if _hooks_dir not in _sys.path:
+        _sys.path.insert(0, _hooks_dir)
+
+    # Primary review trigger: a "Send to Review" button knob on each
+    # WriteTank node. The afterRender knob approach was abandoned as
+    # unreliable (see PIPELINE_REFERENCE.md / 2026-06-17). The artist
+    # renders, reviews the EXRs, then clicks this button on the node that
+    # produced them, which writes the review flag JSON for the Mac Studio
+    # watcher. Single-expression call keeps the knob value robust.
+    _SEND_TO_REVIEW_CMD = "__import__('render_complete_callback').send_to_review()"
+    _REVIEW_KNOB_NAME = "send_to_review"
+
+    def _add_review_button(node):
+        """Idempotently add the Send to Review button knob to a node."""
+        if node is None:
+            return
+        if node.knob(_REVIEW_KNOB_NAME) is not None:
+            # Already present - just make sure the command is current.
+            node.knob(_REVIEW_KNOB_NAME).setCommand(_SEND_TO_REVIEW_CMD)
+            return
+        btn = nuke.PyScript_Knob(_REVIEW_KNOB_NAME, "Send to Review", _SEND_TO_REVIEW_CMD)
+        btn.setFlag(nuke.STARTLINE)
+        node.addKnob(btn)
+
+    def _wire_review_button(*args, **kwargs):
+        _add_review_button(nuke.thisNode())
+
+    nuke.addOnUserCreate(_wire_review_button, nodeClass="WriteTank")
+
+    def _wire_all_on_script_load():
+        for n in nuke.allNodes("WriteTank"):
+            _add_review_button(n)
+
+    nuke.addOnScriptLoad(_wire_all_on_script_load)
+
+    # STUDIO_FARM_RENDER_2026_10_03 -- 'Render on: Local / Farm (Deadline)'
+    # on every WriteTank. See hooks/farm_render.py.
+    try:
+        import farm_render as _farm_render
+        _farm_render.install()
+    except Exception as _farm_exc:
+        nuke.warning("[farm_render] Could not add render controls: %s" % _farm_exc)
+except Exception as _exc:
+    nuke.warning("[render_complete] Could not register Send to Review button: %s" % _exc)
+
+HookClass = sgtk.get_hook_baseclass()
+
+OCIO_CAMERA_INPUT = "Input - ARRI - Curve - LogC4 - EI800"
+OCIO_ACES_WORKING = "ACES - ACEScg"
+
+# STUDIO_STEP_WRITE_DEFAULTS_APPLIED_2026_09_16
+# Mark's request 2026-09-16: the auto-built Write node's render preset
+# depends on the Step. "temp" renders default to 16-bit DWAA (fast,
+# lossy, fine for test renders); "comp" (and any other Step, unchanged)
+# stays on the existing 32-bit float default. Preset names must match
+# settings.tk-nuke.episodic.shot_step.apps.tk-nuke-writenode.write_nodes
+# in env/includes/settings/tk-nuke-episodic.yml -- flag a mismatch there,
+# don't rename one side to fix the other (CLAUDE_INSTRUCTIONS.md rule 7,
+# "Step codes are sacred").
+DEFAULT_WRITE_PRESET = "Primary EXR (32-bit)"
+WRITE_PRESET_BY_STEP = {
+    "temp": "Primary EXR (16-bit DWAA)",
+    "comp": "Primary EXR (32-bit)",
+}
+
+# STUDIO_NEWFILE_FRAME_RANGE_2026_10_27
+# New scripts get their root frame range from Flow first (the Shot's cut
+# in/out - the same fields tk-multi-setframerange uses by default), then
+# from the BG01 plate on disk. Change the field names here, not the code.
+SG_FRAME_IN_FIELD = "sg_cut_in"
+SG_FRAME_OUT_FIELD = "sg_cut_out"
+# "bg01" anywhere in the element / file / folder name, not part of a
+# longer word or number: matches bg01, BG01, BG1, bg001; not bg010, bg11.
+FRAME_RANGE_PLATE_RE = re.compile(r"(?<![a-z0-9])bg0*1(?![0-9])", re.IGNORECASE)
+
+# STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+# sg_cut_in/out include the handles (per Mark), so the script range above
+# is the full plate length. The cut = range minus these handle lengths.
+# Fields are found by DISPLAY NAME in the Flow Shot schema - add a name
+# here if the field is ever renamed. See _handle_fields().
+SG_HANDLES_HEAD_NAMES = ("Handles Head", "Head Handles")
+SG_HANDLES_TAIL_NAMES = ("Handles Tail", "Tail Handles")
+CUT_NOTE_NAME = "CutInfo"
+
+# Matches an EXR frame like "301_001_010_takeA.1001.exr" or
+# "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
+# Anything under plates/ that doesn't match this is treated as a single,
+# non-sequence frame instead of being skipped.
+# Plate scanning itself now lives in plate_reads.py, shared with the
+# "Load Shot Plates" menu command. Kept here only because older copies of
+# this hook referenced it; nothing in this file uses it any more.
+PLATE_SEQ_RE = re.compile(r"^(?P<base>.+?)[._](?P<frame>\d{3,8})\.(?P<ext>exr)$", re.IGNORECASE)
+
+
+class SceneOperation(HookClass):
+
+    def execute(self, operation, file_path, context, parent_action,
+                file_version, read_only, **kwargs):
+
+        engine = self.parent.engine
+
+        if operation == "current_path":
+            root_name = nuke.root().name()
+            return root_name if root_name != "Root" else ""
+
+        elif operation == "open":
+            nuke.scriptOpen(file_path)
+            if read_only:
+                nuke.root()["lock_range"].setValue(True)
+            self._set_project_directory(context)
+
+        elif operation == "save":
+            nuke.scriptSave()
+
+        elif operation == "save_as":
+            old = nuke.root().name()
+            nuke.scriptSaveAs(file_path, overwrite=1)
+            if old != file_path:
+                if hasattr(engine, "save_context_to_script"):
+                    engine.save_context_to_script()
+            self._set_project_directory(context)
+
+        elif operation == "reset":
+            # Ask before discarding unsaved work, as the stock hook does -
+            # this hook now also serves the project/shot/asset environments,
+            # which used the stock hook until 2026-09-26.
+            from sgtk.platform.qt import QtGui
+            while nuke.root().modified():
+                answer = QtGui.QMessageBox.question(
+                    None,
+                    "Save your script?",
+                    "Your script has unsaved changes. Save before proceeding?",
+                    QtGui.QMessageBox.Yes
+                    | QtGui.QMessageBox.No
+                    | QtGui.QMessageBox.Cancel,
+                )
+                if answer == QtGui.QMessageBox.Cancel:
+                    return False
+                if answer == QtGui.QMessageBox.No:
+                    break
+                nuke.scriptSave()
+            nuke.scriptClear()
+            return True
+
+        elif operation == "new":
+            nuke.scriptClear()
+            resolved = self._resolve_new_path(context)
+            self._ensure_dir(resolved)
+            nuke.scriptSaveAs(resolved, overwrite=0)
+            if hasattr(engine, "save_context_to_script"):
+                engine.save_context_to_script()
+            self._set_project_directory(context)
+            self._safe_apply_frame_range(context)
+            if self._is_first_version(context):
+                self._safe_build_color_template(context, engine)
+            nuke.scriptSave()
+            return resolved
+
+        elif operation == "prepare_new":
+            # STUDIO_NEWFILE_CONTEXT_FIX_2026_09_26
+            # Workfiles2 v0.16 "New File" calls reset, then this, and only
+            # THEN changes context - through the app instance of whatever
+            # environment Nuke is currently in (see the module docstring).
+            # So move the engine into the new shot context first, or the
+            # shot's apps (tk-nuke-writenode) are not loaded yet.
+            if not self._is_shot_context(context):
+                # Project / asset / sequence: nothing to build - same as the
+                # stock hook.
+                return True
+            engine = self._ensure_engine_context(context, engine)
+            # tk-nuke-writenode.create_new_write_node() needs a saved script
+            # to resolve its render template fields, so save to the
+            # versioned path BEFORE building the graph.
+            if self._is_first_version(context):
+                resolved = self._resolve_new_path(context)
+                self._ensure_dir(resolved)
+                nuke.scriptSaveAs(resolved, overwrite=0)
+                if hasattr(engine, "save_context_to_script"):
+                    engine.save_context_to_script()
+                self._set_project_directory(context)
+                self._safe_apply_frame_range(context)
+                self._safe_build_color_template(context, engine)
+                nuke.scriptSave()
+            else:
+                self._set_project_directory(context)
+                self._safe_apply_frame_range(context)
+            return True
+
+        elif operation == "version_up":
+            resolved = self._resolve_next_version(context)
+            self._ensure_dir(resolved)
+            nuke.scriptSaveAs(resolved, overwrite=0)
+            if hasattr(engine, "save_context_to_script"):
+                engine.save_context_to_script()
+            self._set_project_directory(context)
+            return resolved
+
+    # -------------------------------------------------------------------------
+    # Template resolution helpers
+    # -------------------------------------------------------------------------
+
+    def _work_template(self, context):
+        return self.parent.sgtk.templates["ep_nuke_shot_work"]
+
+    def _fields(self, context):
+        fields = context.as_template_fields(self._work_template(context))
+        fields.setdefault("nuke_extension", "nk")
+        return fields
+
+    def _resolve_new_path(self, context):
+        return self._resolve_next_version(context, start_at=1)
+
+    def _resolve_next_version(self, context, start_at=None):
+        template = self._work_template(context)
+        fields   = self._fields(context)
+        existing = self._existing_versions(template, fields)
+        if start_at is not None:
+            next_v = max(start_at, (max(existing) + 1) if existing else start_at)
+        else:
+            next_v = (max(existing) + 1) if existing else 1
+        fields["version"] = next_v
+        return template.apply_fields(fields)
+
+    def _existing_versions(self, template, fields):
+        search = dict(fields)
+        search["version"] = 0
+        try:
+            glob_path = template.apply_fields(search)
+        except Exception:
+            return []
+        glob_path = re.sub(r"v\d{3,}", "v*", glob_path)
+        versions = []
+        for path in glob.glob(glob_path):
+            m = re.search(r"v(\d{3,})", os.path.basename(path))
+            if m:
+                versions.append(int(m.group(1)))
+        return sorted(versions)
+
+    def _is_first_version(self, context):
+        return len(self._existing_versions(
+            self._work_template(context), self._fields(context))) <= 1
+
+    @staticmethod
+    def _ensure_dir(path):
+        folder = os.path.dirname(path)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+
+    @staticmethod
+    def _safe_resolve(tk, template_name, fields, fallback):
+        try:
+            tmpl   = tk.templates[template_name]
+            needed = {k: fields[k] for k in tmpl.keys if k in fields}
+            return tmpl.apply_fields(needed)
+        except Exception as exc:
+            nuke.warning("[color] Could not resolve '%s': %s" % (template_name, exc))
+            return fallback
+
+    @staticmethod
+    def _p(path):
+        """Normalise path separators to forward slashes for Nuke."""
+        return path.replace("\\", "/")
+
+    @staticmethod
+    def _debug_log(message):
+        """
+        Write a line to a plain text file on the network share, bypassing
+        Nuke's logging APIs entirely. Use this for diagnosing failures that
+        don't appear in the Script Editor or tk-nuke.log (e.g. when
+        workfiles2 callbacks run before/without a visible Nuke GUI panel).
+
+        Safe to leave in place permanently - it's a no-op cost-wise and a
+        cheap insurance policy against another silent-failure debugging
+        session like 2026-06-16.
+        """
+        try:
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")  # <config>/flow/current/logs
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            log_path = os.path.join(log_dir, "scene_op_debug.log")
+            import datetime
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_path, "a") as f:
+                f.write("[%s] %s\n" % (stamp, message))
+        except Exception:
+            # Never let logging itself break the calling code.
+            pass
+
+    # -------------------------------------------------------------------------
+    # Step-based Write defaults
+    # -------------------------------------------------------------------------
+
+    def _step_code(self, context, fields=None):
+        """Return the lowercase Step short name for this context (e.g.
+        "temp", "comp"), or None if the context has no Step.
+
+        Reads context.step directly rather than the template fields dict:
+        the exact field key a given templates.yml uses for the Step short
+        name isn't guaranteed (not verified against the live
+        core/templates.yml when this was written -- see
+        CLAUDE_INSTRUCTIONS.md rule 2, "verify before writing"), whereas
+        context.step is sgtk's own Context API and is stable regardless of
+        template field naming. fields is accepted only as a secondary
+        fallback if context.step is ever unavailable.
+        """
+        try:
+            step = context.step
+            if step and step.get("name"):
+                return str(step["name"]).strip().lower()
+        except Exception as exc:
+            self._debug_log("_step_code: context.step lookup failed: %r" % exc)
+        if fields:
+            for key in ("Step", "step_name", "step"):
+                val = fields.get(key)
+                if val:
+                    return str(val).strip().lower()
+        return None
+
+    def _write_preset_for_step(self, context, fields=None):
+        """The tk-nuke-writenode preset name to use for this context's Step.
+
+        Must match a `name:` entry under settings.tk-nuke.episodic.
+        shot_step.apps.tk-nuke-writenode.write_nodes in
+        env/includes/settings/tk-nuke-episodic.yml. An unrecognised Step
+        falls back to DEFAULT_WRITE_PRESET and is logged rather than
+        guessed at silently.
+        """
+        step_code = self._step_code(context, fields)
+        if step_code is not None and step_code not in WRITE_PRESET_BY_STEP:
+            self._debug_log(
+                "_write_preset_for_step: Step %r has no entry in "
+                "WRITE_PRESET_BY_STEP, using DEFAULT_WRITE_PRESET %r"
+                % (step_code, DEFAULT_WRITE_PRESET)
+            )
+        return WRITE_PRESET_BY_STEP.get(step_code, DEFAULT_WRITE_PRESET)
+
+    def _fallback_write_knobs_for_step(self, context, fields=None):
+        """Knob values for the plain-Write fallback node (only used if
+        tk-nuke-writenode isn't available -- see _get_write_node_app) so it
+        still matches the Step-based bit-depth default the WriteTank preset
+        would have applied. Kept in sync with WRITE_PRESET_BY_STEP by hand;
+        there are only two presets in play here so a lookup table would be
+        more indirection, not less.
+        """
+        step_code = self._step_code(context, fields)
+        if step_code == "temp":
+            return {
+                "datatype": "16 bit half",
+                "compression": "DWAA",
+                "dw_compression_level": 45,
+            }
+        # comp, and any unrecognised Step, matches DEFAULT_WRITE_PRESET.
+        return {"datatype": "32 bit float"}
+
+    # -------------------------------------------------------------------------
+    # Working-directory helper
+    # -------------------------------------------------------------------------
+
+    def _shot_base_dir(self, context):
+        """Resolve the shot's own folder (shots/{Episode}/{Scene}/{Shot}) via
+        the `shot_base` template. Returns None if it can't be resolved (e.g.
+        wrong context type, template missing needed fields)."""
+        tk = self.parent.sgtk
+        try:
+            fields = self._fields(context)
+            template = tk.templates["shot_base"]
+            needed = {k: fields[k] for k in template.keys if k in fields}
+            return template.apply_fields(needed)
+        except Exception as exc:
+            nuke.warning("[scene_op] Could not resolve shot_base directory: %s" % exc)
+            return None
+
+    def _set_project_directory(self, context):
+        """Make the shot folder Nuke's working location: project_directory
+        knob, cwd, and file-browser favourites (Shot, Shot plates, Shot
+        renders, ...). See hooks/shot_workdir.py. No-op for non-shot
+        contexts; never raises."""
+        try:
+            import shot_workdir
+            shot_workdir.apply(self.parent.sgtk, context, set_script_knob=True)
+        except Exception as exc:
+            self._debug_log("Could not set shot working directory: %r" % exc)
+
+    # -------------------------------------------------------------------------
+    # Context helpers (STUDIO_NEWFILE_CONTEXT_FIX_2026_09_26)
+    # -------------------------------------------------------------------------
+
+    def _is_shot_context(self, context):
+        """True for a Shot + Step context the ep_* templates can resolve."""
+        try:
+            entity = context.entity or {}
+            if entity.get("type") != "Shot" or not context.step:
+                return False
+            self._fields(context)
+            return True
+        except Exception as exc:
+            self._debug_log("_is_shot_context: %r not buildable: %r" % (context, exc))
+            return False
+
+    def _ensure_engine_context(self, context, engine):
+        """Move the engine to `context` if it is not there yet; return the
+        current engine. Raises if the context change fails - Workfiles2
+        shows that to the artist, which beats a silently blank script."""
+        if engine is not None and engine.context == context:
+            return engine
+        self._debug_log(
+            "prepare_new: changing context %s -> %s before building"
+            % (getattr(engine, "context", None), context)
+        )
+        sgtk.platform.change_context(context)
+        return sgtk.platform.current_engine() or engine
+
+    # -------------------------------------------------------------------------
+    # Plates scanning
+    # -------------------------------------------------------------------------
+
+    def _plates_dir(self, context):
+        """The shot's plates folder, from the config's own template.
+
+        Resolved through plate_reads so the menu command and this hook look
+        in exactly the same place; falls back to shot_base/plates if the
+        template lookup fails for any reason.
+        """
+        try:
+            import plate_reads
+            resolved = plate_reads.plates_dir_for_context(self.parent.sgtk, context)
+            if resolved:
+                return resolved
+        except Exception as exc:
+            self._debug_log("plates_dir_for_context failed: %r" % exc)
+        shot_dir = self._shot_base_dir(context)
+        return os.path.join(shot_dir, "plates") if shot_dir else None
+
+    def _scan_plate_sequences(self, plates_dir, shot_code=None):
+        """Find this shot's delivered plate elements.
+
+        Delegates to plate_reads.scan_plates() so this and the "Load Shot
+        Plates" menu command can never disagree about what the plates are.
+        That module knows the real delivery layout - one folder per element,
+        holding a resolution folder, holding the frames:
+
+            plates/301_001_0050_bg01_v02/4608x2592/..._1001.exr
+
+        NOTE (2026-09-10): this used to list plates/ itself and look only at
+        EXRs sitting directly in it, which is not where deliveries land - so
+        it found nothing and every new script got the placeholder Read. Loose
+        EXRs in plates/ are still picked up, for older shots that have them.
+
+        Returns one record per element, best delivery first (highest version,
+        bg before el before ref). See plate_reads.scan_plates for the keys.
+        """
+        try:
+            import plate_reads
+        except Exception as exc:
+            self._debug_log("plate_reads unavailable: %r" % exc)
+            nuke.warning("[scene_op] Could not import plate_reads: %s" % exc)
+            return []
+        records = plate_reads.scan_plates(plates_dir, shot_code=shot_code)
+        for record in records:
+            record["nuke_path"] = self._p(record["nuke_path"])
+        return records
+
+    # -------------------------------------------------------------------------
+    # Frame range for new scripts (STUDIO_NEWFILE_FRAME_RANGE_2026_10_27)
+    # -------------------------------------------------------------------------
+
+    def _shotgrid_frame_range(self, context):
+        """(first, last) from the Shot's cut in/out on Flow, or None if the
+        context is not a Shot, the query fails, or either value is empty."""
+        entity = context.entity or {}
+        if entity.get("type") != "Shot" or not entity.get("id"):
+            return None
+        try:
+            shot = self.parent.shotgun.find_one(
+                "Shot", [["id", "is", entity["id"]]],
+                [SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD],
+            )
+        except Exception as exc:
+            self._debug_log("frame range: Flow query failed for %r: %r" % (entity, exc))
+            return None
+        if not shot:
+            return None
+        first, last = shot.get(SG_FRAME_IN_FIELD), shot.get(SG_FRAME_OUT_FIELD)
+        if first is None or last is None:
+            return None
+        try:
+            first, last = int(first), int(last)
+        except (TypeError, ValueError):
+            return None
+        if last < first:
+            self._debug_log(
+                "frame range: ignoring Flow range %d-%d on %s (out before in)"
+                % (first, last, entity.get("name"))
+            )
+            return None
+        return first, last
+
+    def _bg01_plate_range(self, context):
+        """((first, last), description) from the newest BG01 plate delivery
+        on disk, or (None, None). Uses the same scan as the plate Reads, so
+        the range always matches the Read the template builds."""
+        plates_dir = self._plates_dir(context)
+        if not plates_dir:
+            return None, None
+        shot = (context.entity or {}).get("name")
+        for record in self._scan_plate_sequences(plates_dir, shot_code=shot):
+            if record.get("older") or record.get("count", 0) < 2:
+                continue
+            names = " ".join(
+                str(record.get(k) or "") for k in ("element", "label", "relpath")
+            )
+            if FRAME_RANGE_PLATE_RE.search(names):
+                return (record["first"], record["last"]), record["relpath"]
+        return None, None
+
+    def _safe_apply_frame_range(self, context):
+        """Set the root first/last frame on a new script: Flow cut in/out
+        first, then the BG01 plate, else leave Nuke's default. Never raises;
+        records what it did for the build message (_frame_range_summary)."""
+        self._frame_range_note = "unchanged (Nuke default)"
+        self._cut = None
+        self._cut_note = "not marked - script range not set"
+        try:
+            frame_range = self._shotgrid_frame_range(context)
+            source = "Flow %s / %s" % (SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD)
+            if frame_range is None:
+                frame_range, plate = self._bg01_plate_range(context)
+                source = "BG01 plate %s" % plate
+            if frame_range is None:
+                self._frame_range_note = (
+                    "NOT SET - no cut in/out on Flow and no BG01 plate on disk"
+                )
+                self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
+                return
+            first, last = frame_range
+            root = nuke.root()
+            root["last_frame"].setValue(last)
+            root["first_frame"].setValue(first)
+            root["last_frame"].setValue(last)
+            self._frame_range_note = "%d-%d  (from %s)" % (first, last, source)
+            self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
+            self._cut = self._cut_from_handles(context, first, last)
+            self._apply_cut_marks()
+        except Exception as exc:
+            self._frame_range_note = "NOT SET - error: %s" % exc
+            self._debug_log("frame range failed for %s: %r" % (context, exc))
+
+    # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+    _HANDLE_FIELD_CACHE = {}
+
+    def _handle_fields(self):
+        """(head_code, tail_code) of the Shot fields whose display names are in
+        SG_HANDLES_HEAD_NAMES / SG_HANDLES_TAIL_NAMES. Read once per session
+        from the Flow schema; a failed read is not cached."""
+        cache = self.__class__._HANDLE_FIELD_CACHE
+        if "fields" in cache:
+            return cache["fields"]
+        try:
+            schema = self.parent.shotgun.schema_field_read("Shot")
+        except Exception as exc:
+            self._debug_log("handles: Shot schema read failed: %r" % exc)
+            return None, None
+        want_head = set(n.lower() for n in SG_HANDLES_HEAD_NAMES)
+        want_tail = set(n.lower() for n in SG_HANDLES_TAIL_NAMES)
+        head = tail = None
+        for code, info in sorted(schema.items()):
+            name = ((info.get("name") or {}).get("value") or "").strip().lower()
+            if name in want_head and head is None:
+                head = code
+            elif name in want_tail and tail is None:
+                tail = code
+        self._debug_log("handles: Shot fields head=%r tail=%r" % (head, tail))
+        cache["fields"] = (head, tail)
+        return head, tail
+
+    def _cut_from_handles(self, context, first, last):
+        """(cut_in, cut_out, head, tail): the script range minus the Shot's
+        Handles Head / Handles Tail. None (reason in _cut_note) if unknown.
+        Never raises."""
+        try:
+            entity = context.entity or {}
+            if entity.get("type") != "Shot" or not entity.get("id"):
+                self._cut_note = "not marked - not a Shot context"
+                return None
+            head_f, tail_f = self._handle_fields()
+            if not head_f or not tail_f:
+                self._cut_note = (
+                    "not marked - no %s / %s field found on Shot"
+                    % (SG_HANDLES_HEAD_NAMES[0], SG_HANDLES_TAIL_NAMES[0]))
+                return None
+            shot = self.parent.shotgun.find_one(
+                "Shot", [["id", "is", entity["id"]]], [head_f, tail_f]) or {}
+            head, tail = shot.get(head_f), shot.get(tail_f)
+            if head in (None, "") or tail in (None, ""):
+                self._cut_note = "not marked - Handles Head/Tail empty on Flow"
+                return None
+            head, tail = int(float(head)), int(float(tail))
+            cut_in, cut_out = first + head, last - tail
+            if head < 0 or tail < 0 or cut_out < cut_in:
+                self._cut_note = (
+                    "not marked - handles %d/%d do not fit range %d-%d"
+                    % (head, tail, first, last))
+                return None
+            self._cut_note = "%d-%d  (handles %d head / %d tail)" % (
+                cut_in, cut_out, head, tail)
+            return cut_in, cut_out, head, tail
+        except Exception as exc:
+            self._cut_note = "not marked - error: %s" % exc
+            return None
+        finally:
+            self._debug_log("cut: %s for %s" % (self._cut_note, context))
+
+    def _apply_cut_marks(self, near=None):
+        """Lock every Viewer's in/out to the cut and write/update the
+        CutInfo sticky note (moved beside `near` when given). Never raises."""
+        cut = getattr(self, "_cut", None)
+        if not cut:
+            return
+        cut_in, cut_out, head, tail = cut
+        try:
+            with nuke.root():
+                for viewer in nuke.allNodes("Viewer"):
+                    try:
+                        viewer["frame_range"].setValue("%d-%d" % (cut_in, cut_out))
+                        viewer["frame_range_lock"].setValue(True)
+                    except Exception as exc:
+                        self._debug_log("cut: Viewer in/out failed on %s: %r"
+                                        % (viewer.name(), exc))
+                note = nuke.toNode(CUT_NOTE_NAME)
+                if note is None:
+                    note = nuke.nodes.StickyNote(name=CUT_NOTE_NAME)
+                root = nuke.root()
+                note["label"].setValue(
+                    "CUT  %d - %d\nhandles  %d head / %d tail\nscript  %d - %d"
+                    % (cut_in, cut_out, head, tail,
+                       int(root["first_frame"].value()),
+                       int(root["last_frame"].value())))
+                try:
+                    note["note_font_size"].setValue(24)
+                except Exception:
+                    pass
+                if near is not None:
+                    note.setXYpos(near.xpos() + 200, near.ypos())
+        except Exception as exc:
+            self._debug_log("cut: marking failed: %r" % exc)
+
+    def _cut_summary(self):
+        return getattr(self, "_cut_note", "not marked")
+
+    def _frame_range_summary(self):
+        return getattr(self, "_frame_range_note", "unchanged (Nuke default)")
+
+    # -------------------------------------------------------------------------
+    # tk-nuke-writenode app lookup (with retry)
+    # -------------------------------------------------------------------------
+
+    def _get_write_node_app(self, engine, retries=6, delay=0.5):
+        """Return the tk-nuke-writenode app instance, retrying briefly if it
+        isn't registered in engine.apps yet.
+
+        This is the documented failure mode behind the old "have to click
+        New File twice" symptom: prepare_new firing before every app
+        instance has finished initializing. Disabling
+        tk-multi-workfiles2's launch_at_startup (see tk-nuke-episodic.yml)
+        removes the main trigger for that race, but this retry keeps the
+        build robust rather than falling back to a plain Write node (and
+        silently losing the Send to Review button) the instant it happens.
+        """
+        for _attempt in range(retries):
+            wn_app = engine.apps.get("tk-nuke-writenode")
+            if wn_app is not None:
+                return wn_app
+            time.sleep(delay)
+        return None
+
+    # -------------------------------------------------------------------------
+    # Color template builder
+    # -------------------------------------------------------------------------
+
+    def _safe_build_color_template(self, context, engine):
+        """Wrapper around _build_color_template that never leaves the artist
+        looking at a blank script with no explanation. Any exception is
+        logged (with traceback) to scene_op_debug.log and surfaced via
+        nuke.message, instead of silently aborting prepare_new/new."""
+        try:
+            self._build_color_template(context, engine)
+        except Exception as exc:
+            import traceback as _tb
+            trace = _tb.format_exc()
+            nuke.tprint("[scene_op] _build_color_template failed:\n%s" % trace)
+            self._debug_log("_build_color_template failed: %r\n%s" % (exc, trace))
+            try:
+                nuke.message(
+                    "The color-pipeline template failed to build automatically.\n\n"
+                    "Error: %s\n\n"
+                    "A blank versioned script was still saved for you - build the "
+                    "graph manually, or try File > New again. See "
+                    "scene_op_debug.log for the full traceback."
+                    % exc
+                )
+            except Exception:
+                pass
+
+    def _build_color_template(self, context, engine):
+        tk     = self.parent.sgtk
+        fields = self._fields(context)
+
+        shot = fields.get("Shot", "SHOT")
+
+        plates_dir = self._plates_dir(context)
+        plate_sequences = self._scan_plate_sequences(plates_dir, shot_code=shot)
+
+        render_template = tk.templates.get("ep_nuke_shot_render_work")
+        if render_template:
+            render_fields = dict(fields)
+            render_fields["output"] = "beauty"
+            render_fields["version"] = 1
+            try:
+                render_path = render_template.apply_fields(render_fields)
+            except Exception:
+                render_path = "PLACEHOLDER/render/%s_beauty_v001.####.exr" % shot
+        else:
+            render_path = "PLACEHOLDER/render/%s_beauty_v001.####.exr" % shot
+
+        # ── Layout constants ──────────────────────────────────────────────
+        x0, y0  = 0, 0
+        x_vfx   = 300
+        x_extra = -300
+        x_main  = 0
+        y_step  = 130
+
+        y = y0
+
+        # ── Read: one per plate element delivered for this shot ───────────
+        # Built by plate_reads.make_read so these are identical to the nodes
+        # the "Load Shot Plates" menu command makes - same colorspace
+        # handling, same labels. The first element (bg, by the ordering
+        # plate_reads applies) is wired into the graph as the primary plate;
+        # the rest are placed alongside, unwired, for the artist.
+        if plate_sequences:
+            import plate_reads
+            primary = plate_sequences[0]
+            read_plates = plate_reads.make_read(primary, primary=True)
+            read_plates.setXYpos(x_main, y)
+
+            for i, seq in enumerate(plate_sequences[1:], start=1):
+                extra = plate_reads.make_read(
+                    seq, primary=False, note="Not wired - connect manually"
+                )
+                # Every sequence is loaded now, so there can be a dozen:
+                # a row to the left of the primary, 8 per row, rows
+                # stacking upward.
+                row, col = divmod(i - 1, 8)
+                extra.setXYpos(x_main - 150 * (col + 1), y0 - row * y_step)
+        else:
+            # No EXRs found in plates/ yet (e.g. before plates are
+            # delivered). Keep the graph structurally valid with a
+            # placeholder the artist can repoint once plates land.
+            fallback_path = self._p(
+                os.path.join(plates_dir or "PLACEHOLDER/plates", "%s.####.exr" % shot)
+            )
+            read_plates = nuke.createNode("Read", inpanel=False)
+            read_plates["file"].setValue(fallback_path)
+            read_plates["raw"].setValue(True)
+            read_plates["colorspace"].setValue("raw")
+            read_plates["label"].setValue(
+                "PLATE PLACEHOLDER\n(no EXRs found in plates/ yet — browse manually)\n[value file]"
+            )
+            read_plates.setXYpos(x_main, y)
+
+        # ── Dot: ACEScg working ───────────────────────────────────────────
+        y += y_step
+        dot_working = nuke.createNode("Dot", inpanel=False)
+        dot_working.setInput(0, read_plates)
+        dot_working["label"].setValue("ACEScg working")
+        dot_working.setXYpos(x_main + 34, y)
+
+        # ── Read: VFX pull placeholder (raw, already ACEScg) ─────────────
+        read_vfx = nuke.createNode("Read", inpanel=False)
+        read_vfx["file"].setValue("REPLACE_WITH_VFX_PULL_PATH.####.exr")
+        read_vfx["raw"].setValue(True)
+        read_vfx["colorspace"].setValue("raw")
+        read_vfx["label"].setValue("VFX PULL\n(raw ACEScg — no conversion)\n[value file]")
+        read_vfx.setXYpos(x_vfx, y - y_step)
+
+        # ── Merge: plates + VFX in ACEScg ────────────────────────────────
+        y += y_step
+        merge = nuke.createNode("Merge2", inpanel=False)
+        merge.setInput(0, dot_working)
+        merge.setInput(1, read_vfx)
+        merge["label"].setValue("Working: ACEScg")
+        merge.setXYpos(x_main, y)
+
+        # ── Dot: to Write ─────────────────────────────────────────────────
+        y += y_step
+        dot_write = nuke.createNode("Dot", inpanel=False)
+        dot_write.setInput(0, merge)
+        dot_write["label"].setValue("to Write")
+        dot_write.setXYpos(x_main + 34, y)
+
+        # ── Write: TK Write Node (Step-based EXR preset) ────────────
+        # We use tk-nuke-writenode's WriteTank gizmo so the file path is
+        # driven by the ep_nuke_shot_render_work template. The "Send to
+        # Review" button knob is added to this node by the wiring near the
+        # top of this module (via onUserCreate / onScriptLoad).
+        #
+        # STUDIO_STEP_WRITE_DEFAULTS_APPLIED_2026_09_16: preset now depends on the Step
+        # (temp -> 16-bit DWAA, comp -> 32-bit) -- see WRITE_PRESET_BY_STEP
+        # near the top of this file.
+        y += y_step
+        write_preset = self._write_preset_for_step(context, fields)
+        try:
+            wn_app = self._get_write_node_app(engine)
+            if wn_app is None:
+                raise RuntimeError(
+                    "tk-nuke-writenode app not available in engine.apps after retrying"
+                )
+            # Select dot_write first so the new node connects to it
+            for sel in nuke.selectedNodes():
+                sel.setSelected(False)
+            dot_write.setSelected(True)
+            # create_new_write_node creates the node but doesn't return it.
+            # Snapshot the WriteTank nodes before/after to grab the new one.
+            _existing = set(nuke.allNodes("WriteTank"))
+            wn_app.create_new_write_node(write_preset)
+            _new_nodes = [n for n in nuke.allNodes("WriteTank") if n not in _existing]
+            if not _new_nodes:
+                raise RuntimeError("create_new_write_node returned no new WriteTank node")
+            write = _new_nodes[0]
+            write["label"].setValue(
+                "EXR OUTPUT\n(ACEScg linear — no bake)\n[%s]" % write_preset
+            )
+            write.setXYpos(x_main, y)
+        except Exception as _wn_exc:
+            # Fallback: if tk-nuke-writenode isn't loaded for some reason,
+            # fall back to a plain Write node so the script still works.
+            # Note: render-complete callback will NOT fire on this path.
+            import traceback as _tb
+            _trace = _tb.format_exc()
+            # Use nuke.tprint (always goes to stdout, never silenced by Nuke
+            # warning filters or Script Editor visibility timing) and write
+            # to root-level error log too for guaranteed capture.
+            nuke.tprint("[scene_op] tk-nuke-writenode fallback triggered. Exception was:\n%s" % _trace)
+            self._debug_log(
+                "tk-nuke-writenode fallback triggered for shot=%s. Exception: %r\n%s"
+                % (shot, _wn_exc, _trace)
+            )
+            try:
+                nuke.warning("[scene_op] tk-nuke-writenode fallback. See stdout for traceback. Error: %r" % _wn_exc)
+            except Exception:
+                pass
+            write = nuke.createNode("Write", inpanel=False)
+            write.setInput(0, dot_write)
+            write["file"].setValue(self._p(render_path))
+            write["file_type"].setValue("exr")
+            write["raw"].setValue(True)
+            write["colorspace"].setValue("raw")
+            for _fb_knob, _fb_value in self._fallback_write_knobs_for_step(
+                context, fields
+            ).items():
+                try:
+                    write[_fb_knob].setValue(_fb_value)
+                except Exception as _fb_exc:
+                    self._debug_log(
+                        "Fallback Write: could not set %s = %r: %r"
+                        % (_fb_knob, _fb_value, _fb_exc)
+                    )
+            write["label"].setValue(
+                "EXR OUTPUT (FALLBACK)\n(ACEScg linear — no bake)\n[%s]" % write_preset
+            )
+            write.setXYpos(x_main, y)
+
+        # ── Viewer ────────────────────────────────────────────────────────
+        y += y_step
+        viewer = nuke.createNode("Viewer", inpanel=False)
+        viewer.setInput(0, dot_write)
+        viewer["label"].setValue("Display via OCIO viewer LUT")
+        viewer.setXYpos(x_main, y)
+        self._apply_cut_marks(near=write)  # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
+
+        plate_summary = (
+            "\n".join(
+                "  - %s (%d-%d)%s"
+                % (s["label"], s["first"], s["last"],
+                   ("" if i == 0 else "  [not wired]")
+                   + ("  [older delivery]" if s.get("older") else ""))
+                for i, s in enumerate(plate_sequences)
+            )
+            if plate_sequences
+            else "  (none found in plates/ yet — placeholder Read added)"
+        )
+
+        nuke.message(
+            "Color pipeline loaded for %s.\n\n"
+            "Working space : ACEScg\n\n"
+            "Frame range   : %s\n"
+            "Cut (Viewer in/out) : %s\n\n"
+            "Plates (plates/, assumed ACEScg linear, raw — no conversion):\n%s\n\n"
+            "VFX Pulls : Replace path in VFX PULL Read node\n"
+            "  → raw read, already ACEScg — no conversion needed\n\n"
+            "Write node : EXR in ACEScg linear — no color baked in\n"
+            "  → %s\n"
+            "  → preset: %s (Step-based default)\n\n"
+            "Nuke's project directory has been set to this shot's folder.\n\n"
+            "Review QTs are generated externally from EXR renders.\n"
+            "Viewer display is handled by the OCIO viewer LUT."
+            % (shot, self._frame_range_summary(), self._cut_summary(),
+               plate_summary, render_path,
+               write_preset)
+        )

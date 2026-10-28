@@ -222,13 +222,14 @@ paths:
     shot_publish_area_blender:
         definition: '@shot_root/blender/publish'
 
-    # NOTE: unlike Maya/Nuke, Blender work/publish files get their own
-    # per-version subfolder. Blender's linked/appended libraries resolve by
-    # relative path, so multiple versions sharing one folder risks a newer
-    # save silently breaking an older version's links. This matches the
-    # pattern used by the reference tk-blender engine config.
+    # BLENDER_WORK_FLAT_2026_10_28: work files sit directly in blender/work/,
+    # like Maya, with no per-version subfolder (Mark's call). Publish and
+    # snapshot templates still use a per-version subfolder.
+    # Trade-off: every work version now shares one folder, so a relative
+    # path ("//textures/...") resolves to the same place for all of them.
+    # Keep per-version caches/bakes named with the version.
     ep_blender_shot_work:
-        definition: '@shot_root/blender/work/{Shot}_{vendor_code}_{Step}_v{version}/{Shot}_{vendor_code}_{Step}_v{version}.blend'
+        definition: '@shot_root/blender/work/{Shot}_{vendor_code}_{Step}_v{version}.blend'
     ep_blender_shot_publish:
         definition: '@shot_root/blender/publish/{Shot}_{vendor_code}_{Step}_v{version}/{Shot}_{vendor_code}_{Step}_v{version}.blend'
 

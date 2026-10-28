@@ -220,17 +220,72 @@ def _read_embedded_start_tc(exr_files, first_frame, render_template):
                 pass
 
 
+
+# STUDIO_FLAG_CUT_MINUS_HANDLES_2026_10_28
+# sg_cut_in/out on Lucid S3 include the handles (per Mark, 2026-10-28). The
+# flag's cut_in/cut_out is the EDIT range - the QT frame counter is white
+# inside it and yellow on handles - so subtract the Shot fields displayed as
+# "Handles Head" / "Handles Tail". Their field codes are not recorded
+# anywhere, so they are found by DISPLAY NAME in the Shot schema (once per
+# process). Handles unknown -> (None, None): a plain white counter, never a
+# wrong one.
+HANDLES_HEAD_NAMES = ("Handles Head", "Head Handles")
+HANDLES_TAIL_NAMES = ("Handles Tail", "Tail Handles")
+_HANDLE_FIELD_CODES = {}
+
+
+def _handle_field_codes(sg):
+    """(head_code, tail_code) by display name; a failed read is not cached."""
+    if "codes" in _HANDLE_FIELD_CODES:
+        return _HANDLE_FIELD_CODES["codes"]
+    schema = sg.schema_field_read("Shot")
+    want_head = set(n.lower() for n in HANDLES_HEAD_NAMES)
+    want_tail = set(n.lower() for n in HANDLES_TAIL_NAMES)
+    head = tail = None
+    for code, info in sorted(schema.items()):
+        name = ((info.get("name") or {}).get("value") or "").strip().lower()
+        if name in want_head and head is None:
+            head = code
+        elif name in want_tail and tail is None:
+            tail = code
+    _HANDLE_FIELD_CODES["codes"] = (head, tail)
+    return head, tail
+
+
+def _edit_range(shot, head_f, tail_f, cut_in, cut_out):
+    """(edit_in, edit_out, note): cut in/out minus handles, or (None, None, why)."""
+    if cut_in is None or cut_out is None:
+        return None, None, "no cut in/out on the Shot"
+    if not head_f or not tail_f:
+        return None, None, "no Handles Head / Handles Tail field on Shot"
+    head, tail = shot.get(head_f), shot.get(tail_f)
+    if head in (None, "") or tail in (None, ""):
+        return None, None, "Handles Head/Tail empty on the Shot"
+    head, tail = int(float(head)), int(float(tail))
+    edit_in, edit_out = int(cut_in) + head, int(cut_out) - tail
+    if head < 0 or tail < 0 or edit_out < edit_in:
+        return None, None, "handles %d/%d do not fit cut %s-%s" % (
+            head, tail, cut_in, cut_out)
+    return edit_in, edit_out, "edit %d-%d (cut %s-%s, handles %d/%d)" % (
+        edit_in, edit_out, cut_in, cut_out, head, tail)
+
+
 def _cut_range(sg, shot_entity_id):
-    """Cut in/out (edit range) from the Shot entity in SG."""
+    """EDIT range (cut in/out minus handles) for the flag, or (None, None).
+    See _edit_range(); the decision is logged to send_to_review_debug.log."""
     try:
+        head_f, tail_f = _handle_field_codes(sg)
         shot = sg.find_one(
             "Shot",
             [["id", "is", shot_entity_id]],
-            ["sg_cut_in", "sg_cut_out", "cut_in", "cut_out"],
-        )
+            ["sg_cut_in", "sg_cut_out", "cut_in", "cut_out"]
+            + [f for f in (head_f, tail_f) if f],
+        ) or {}
         cut_in = shot.get("sg_cut_in") or shot.get("cut_in")
         cut_out = shot.get("sg_cut_out") or shot.get("cut_out")
-        return cut_in, cut_out
+        edit_in, edit_out, note = _edit_range(shot, head_f, tail_f, cut_in, cut_out)
+        _debug_log("cut range for Shot %s: %s" % (shot_entity_id, note))
+        return edit_in, edit_out
     except Exception as exc:
         nuke.warning("[render_complete] Could not read cut in/out: %s" % exc)
         return None, None

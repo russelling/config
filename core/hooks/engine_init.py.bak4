@@ -1,0 +1,145 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+engine_init.py
+
+Toolkit core hook, called automatically every time an engine finishes
+starting. Used here to register config-level commands that are not apps.
+
+Currently: the Nuke "Load Shot Plates" command, which adds a Read node for
+each plate element delivered for the current shot. The same code runs
+automatically when Workfiles2 creates the first version of a shot's script
+(see hooks/scene_operation_tk-nuke.py); this makes it available on demand
+too, for a plate that landed after the script was made.
+
+hooks/ is not on sys.path for a core hook, so plate_reads.py is imported by
+file path the same way post_engine_init_register_render_callback.py does it.
+
+Anything that fails here is logged and swallowed: a missing menu command is
+an inconvenience, an engine that will not start is a stopped artist.
+"""
+
+import os
+import sys
+import importlib.util
+
+import sgtk
+
+HookBaseClass = sgtk.get_hook_baseclass()
+
+
+class EngineInit(HookBaseClass):
+
+    @staticmethod
+    def _log(engine, level, message):
+        """Log without ever raising - this runs during engine startup, and an
+        exception escaping here is a Nuke that will not open."""
+        try:
+            getattr(engine.logger, level)(message)
+        except Exception:
+            pass
+
+    def execute(self, engine, **kwargs):
+        # STUDIO_BUFFALO_MENU_2026_09_29: register the config-level commands
+        # (below), then Rebuild Write Node, then file everything under
+        # Flow Production Tracking > Buffalo VFX (hooks/buffalo_menu.py) and
+        # rebuild the menu -- tk-core runs this hook AFTER tk-nuke has built
+        # its menu (tk-core v0.23.8 engine.py __init__), so without a rebuild
+        # commands registered here only appear after the first context change.
+        self._register_commands(engine)
+        if getattr(engine, "name", None) != "tk-nuke":
+            return
+        for module_name in ("write_node_rebuild", "buffalo_menu"):
+            try:
+                module = self._load_config_module(module_name)
+                if module_name == "buffalo_menu":
+                    module.organise(engine)
+                else:
+                    module.register(engine)
+                    self._log(engine, "info", "%s: registered." % module_name)
+            except Exception as exc:
+                self._log(engine, "error", "%s: failed: %s" % (module_name, exc))
+
+    @staticmethod
+    def _load_config_module(module_name):
+        config_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(config_root, "hooks", module_name + ".py")
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _register_commands(self, engine):
+        if getattr(engine, "name", None) != "tk-nuke":
+            return
+        # STUDIO_SHOT_WORKDIR_2026_09_26: a Nuke launched straight into a
+        # shot gets its cwd + file-browser favourites too
+        # (hooks/shot_workdir.py). Independent of the blocks below.
+        try:
+            wd_root = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            wd_path = os.path.join(wd_root, "hooks", "shot_workdir.py")
+            if os.path.exists(wd_path):
+                spec = importlib.util.spec_from_file_location(
+                    "shot_workdir", wd_path
+                )
+                shot_workdir = importlib.util.module_from_spec(spec)
+                sys.modules["shot_workdir"] = shot_workdir
+                spec.loader.exec_module(shot_workdir)
+                self._log(engine, "info", "shot_workdir: %s" % shot_workdir.apply(
+                    engine.sgtk, engine.context, set_script_knob=False))
+        except Exception as exc:
+            self._log(engine, "error", "shot_workdir: failed: %s" % exc)
+        # DAILIES_VIEWER_REGISTERED_2026_09_17
+        # Dailies-match Viewer Input Process (hooks/dailies_viewer.py).
+        # Independent of the plate_reads block below: no early return here.
+        try:
+            dv_root = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            dv_path = os.path.join(dv_root, "hooks", "dailies_viewer.py")
+            if not os.path.exists(dv_path):
+                self._log(engine, "warning",
+                          "dailies_viewer: not found at %s - dailies viewer "
+                          "commands not registered." % dv_path)
+            else:
+                spec = importlib.util.spec_from_file_location(
+                    "dailies_viewer", dv_path
+                )
+                dailies_viewer = importlib.util.module_from_spec(spec)
+                sys.modules["dailies_viewer"] = dailies_viewer
+                spec.loader.exec_module(dailies_viewer)
+                dailies_viewer.register(engine)
+                self._log(engine, "info",
+                          "dailies_viewer: registered dailies viewer commands.")
+        except Exception as exc:
+            self._log(engine, "error",
+                      "dailies_viewer: failed to register commands: %s" % exc)
+
+        try:
+            config_root = os.path.dirname(          # <config>/
+                os.path.dirname(                    # <config>/core/
+                    os.path.dirname(os.path.abspath(__file__))  # core/hooks/
+                )
+            )
+            module_path = os.path.join(config_root, "hooks", "plate_reads.py")
+            if not os.path.exists(module_path):
+                self._log(engine, "warning",
+                          "plate_reads: not found at %s - 'Load Shot Plates' "
+                          "not registered." % module_path)
+                return
+
+            spec = importlib.util.spec_from_file_location(
+                "plate_reads", module_path
+            )
+            plate_reads = importlib.util.module_from_spec(spec)
+            sys.modules["plate_reads"] = plate_reads
+            spec.loader.exec_module(plate_reads)
+
+            plate_reads.register(engine)
+            self._log(engine, "info",
+                      "plate_reads: registered 'Load Shot Plates' command.")
+        except Exception as exc:
+            self._log(engine, "error",
+                      "plate_reads: failed to register 'Load Shot Plates': %s"
+                      % exc)
