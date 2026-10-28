@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="buf_acescg_to_dlog_dgamut" name="ACEScg_to_DLog_DGamut">
+    <Description>ACEScg to DJI D-Log / D-Gamut. Generated 2026-10-27 from OCIO built-in studio-config-v4.0.0_aces-v2.0_ocio-v2.5 (colorspace dlog_dgamut), so it matches what qt_bake_oiio.py converts to. For Nuke sessions whose OCIO config has no D-Log colourspace.</Description>
+    <Matrix inBitDepth="32f" outBitDepth="32f">
+        <Array dim="3 3">
+  0.695452241357452   0.140678696470294   0.163869062172254
+ 0.0447945633720377   0.859671118456422  0.0955343181715404
+-0.00552588255811354  0.00402521030597866     1.00150067225213
+        </Array>
+    </Matrix>
+    <Matrix inBitDepth="32f" outBitDepth="32f">
+        <Array dim="3 3">
+   1.47385956498983  -0.323818263543187  -0.150041301446643
+ -0.095207528892422    1.01484102374948  0.0803665051429386
+ 0.0165606517533943  0.0666183923449543   0.916820955901654
+        </Array>
+    </Matrix>
+    <Log inBitDepth="32f" outBitDepth="32f" style="cameraLinToLog">
+        <LogParams base="10" linSideSlope="0.9892" linSideOffset="0.0108" logSideSlope="0.256662970719888" logSideOffset="0.58455504907396" linSideBreak="0.00758078675" />
+    </Log>
+</ProcessList>

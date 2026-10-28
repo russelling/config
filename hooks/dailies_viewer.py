@@ -197,6 +197,39 @@ ACESCG_CANDIDATES = ("ACEScg", "ACES - ACEScg", "lin_ap1")
 # name goes first here; "arri_logc4" (the alias qt_bake_oiio.py passes to
 # oiiotool, which does accept aliases) is kept as a fallback.
 LOGC4_CANDIDATES = ("ARRI LogC4", "arri_logc4")
+
+# Per-camera log spaces (CAMERA_LOG_SPACE_2026_10_27). The bake's
+# resolve_log_space() returns an OCIO alias; these are the Nuke-side NAME
+# candidates for each, verified against studio-config-v1.0.0 (Nuke's pin).
+LOG_SPACE_CANDIDATES = {
+    "arri_logc4": LOGC4_CANDIDATES,
+    "log3g10_redwidegamutrgb": ("Log3G10 REDWideGamutRGB",
+                                "log3g10_redwidegamutrgb",
+                                "Input - RED - REDLog3G10 - REDWideGamutRGB"),
+    "slog3_sgamut3cine": ("S-Log3 S-Gamut3.Cine", "slog3_sgamut3cine",
+                          "Input - Sony - S-Log3 - S-Gamut3.Cine"),
+    "dlog_dgamut": ("D-Log D-Gamut", "dlog_dgamut"),
+}
+# Log spaces Nuke's config does not have. D-Log D-Gamut only exists in the
+# v4.0.0+ studio configs (OCIO 2.5); Nuke 15.1 ships OCIO 2.2.1 and Nuke 17.1
+# OCIO 2.4.2, so neither can load one. The CTF is the bake's own dlog_dgamut
+# transform, written out by OCIO from studio-config-v4.0.0 and read back
+# identically by OCIO 2.2.1 and 2.4.2. It lives in nuke/ocio/ next to the
+# pinned config.
+LOG_SPACE_CTF = {
+    "dlog_dgamut": "ACEScg_to_DLog_DGamut.ctf",
+}
+
+
+def _log_space_ctf(name):
+    """Path to the ACEScg -> <name> CTF for this log space, or None."""
+    filename = LOG_SPACE_CTF.get(name)
+    if not filename:
+        return None
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.normpath(os.path.join(here, os.pardir, "nuke", "ocio",
+                                         filename))
+    return path if os.path.isfile(path) else None
 REC709_DISPLAY_CANDIDATES = ("Gamma 2.2 Rec.709 - Display",
                              "Rec.1886 Rec.709 - Display",
                              "sRGB - Display")
@@ -398,6 +431,8 @@ def resolve_dailies_chain(tk, context, camera_override=None):
         "show_lut_reason": None,
         "display_fallback": False,
         "logc4_name": None,
+        "log_space": None,
+        "log_space_reason": None,
         "display_name": None,
         "view_name": None,
     }
@@ -484,7 +519,21 @@ def resolve_dailies_chain(tk, context, camera_override=None):
                 "%s -- falling back to the generic ACES display transform, "
                 "which is NOT the show look." % reason)
 
-    result["logc4_name"] = m.OCIO_LOGC4
+    # The log space the CDL and LUT expect, by the bake's own rule
+    # (CAMERA_LOG_SPACES). Optional so an older bake still loads.
+    resolve_log = getattr(m, "resolve_log_space", None)
+    if resolve_log is not None:
+        log_name, log_why = resolve_log({"camera": camera} if camera else {})
+    else:
+        log_name, log_why = m.OCIO_LOGC4, "bake predates per-camera log spaces"
+        if camera:
+            result["reasons"].append(
+                "This qt_bake_oiio.py has no resolve_log_space(); camera %r "
+                "is previewed in LogC4, which is wrong for any non-ARRI LUT."
+                % camera)
+    result["log_space"] = log_name
+    result["log_space_reason"] = log_why
+    result["logc4_name"] = log_name   # older readers of this key
     result["display_name"] = m.OCIO_REC709_DISPLAY
     result["view_name"] = m.OCIO_REC709_VIEW
     result["ok"] = True
@@ -680,11 +729,33 @@ def build_dailies_viewer_group(chain):
         inp = nuke.createNode("Input", inpanel=False)
         last = inp
 
+        log_name = chain.get("log_space") or "arri_logc4"
+        log_candidates = LOG_SPACE_CANDIDATES.get(log_name, (log_name,))
         cs = nuke.createNode("OCIOColorSpace", inpanel=False)
         used_in = _set_colorspace_knob(cs, "in_colorspace", ACESCG_CANDIDATES,
                                        what="working space")
-        used_out = _set_colorspace_knob(cs, "out_colorspace", LOGC4_CANDIDATES,
-                                        what="LogC4")
+        _k, offered = _knob_choices(cs, "out_colorspace")
+        in_config = (not offered) or any(
+            _match_choice(offered, c) is not None for c in log_candidates)
+        ctf = _log_space_ctf(log_name)
+        if used_in and not in_config and ctf:
+            # This config has no such colourspace (D-Log under the ACES 1.3
+            # pin): apply the bake's own transform from the CTF instead.
+            # working_space=ACEScg, as for the LUT below -- the buffer IS
+            # ACEScg here, so the knob is a no-op either way it is read.
+            nuke.delete(cs)
+            cs = nuke.createNode("OCIOFileTransform", inpanel=False)
+            _try_set(cs, "file", ctf.replace("\\", "/"))
+            _set_colorspace_knob(cs, "working_space", ACESCG_CANDIDATES,
+                                 what="log stage working space")
+            cs["label"].setValue("ACEScg -> %s\n(%s)"
+                                 % (log_name, os.path.basename(ctf)))
+            used_out = log_name
+            print("[dailies_viewer] %s is not in this OCIO config; using %s"
+                  % (log_name, ctf))
+        else:
+            used_out = _set_colorspace_knob(cs, "out_colorspace",
+                                            log_candidates, what=log_name)
         if not (used_in and used_out):
             # REFUSE. The CDL and the .cube both expect LogC4; feeding them
             # scene-linear ACEScg instead bakes a dark, contrasty picture that
@@ -702,7 +773,7 @@ def build_dailies_viewer_group(chain):
                 "rather than a dailies match.\n\n"
                 "Run Trace Dailies Match and check the Script Editor for the "
                 "list of names this config does offer."
-                % ("ACEScg" if not used_in else "ARRI LogC4"))
+                % ("ACEScg" if not used_in else log_name))
         cs.setInput(0, last)
         last = cs
 
@@ -967,8 +1038,18 @@ def trace_dailies_match(camera_override=None):
 
     _section("4. Nuke chain this would build")
     print("  Input")
-    print("  OCIOColorSpace   ACEScg -> %s   (verified against this OCIO "
-          "config at build time)" % chain["logc4_name"])
+    log_name = chain.get("log_space") or chain["logc4_name"]
+    print("  log space        %s  (%s)" % (log_name,
+                                           chain.get("log_space_reason")))
+    if log_name in LOG_SPACE_CTF:
+        print("  OCIOColorSpace   ACEScg -> %s   if this config has it, else"
+              % log_name)
+        print("  OCIOFileTransform %s" % (_log_space_ctf(log_name)
+                                          or "<CTF MISSING: nuke/ocio/%s>"
+                                          % LOG_SPACE_CTF[log_name]))
+    else:
+        print("  OCIOColorSpace   ACEScg -> %s   (verified against this OCIO "
+              "config at build time)" % log_name)
     if chain["cdl_cc_path"]:
         print("  OCIOCDLTransform file: %s" % chain["cdl_raw_path"])
         if chain["cdl_cccid"]:
@@ -1001,7 +1082,7 @@ def _ask_camera():
     return nuke.getInput(
         "Camera override (blank = bake default / ARRI).\n"
         "The ShotGrid camera field for per-camera show LUTs isn't wired up "
-        "yet -- type arri / red / sony to test one of those show LUTs.", "")
+        "yet -- type arri / red / sony / dji to test one of those LUTs.", "")
 
 
 def _reload_self():
