@@ -295,6 +295,49 @@ def _cut_range(sg, shot_entity_id):
 # Main callback
 # ---------------------------------------------------------------------------
 
+def _flow_user(tk, sg):
+    """The Flow HumanUser who is submitting, and how it was found.
+
+    Returns (HumanUser dict with id/name/login, how) or (None, why).
+
+    Not sgtk.util.get_current_user(): core/shotgun.yml carries script
+    credentials (qt_watcher needs them), so this session is the script
+    user, and for a script user get_current_user() falls back to the
+    workstation login -- which on this show is not a Flow login (2026-10-29).
+
+      1. The session's authenticated user, when it is a person.
+      2. The user signed in to Flow Production Tracking on this machine,
+         from Toolkit's session cache for this site.
+
+    The workstation login is never used to find a person. Never raises.
+    """
+    login, how = None, None
+    try:
+        auth_user = sgtk.get_authenticated_user()
+        login = getattr(auth_user, "login", None) if auth_user else None
+    except Exception:
+        login = None
+    if login:
+        how = "Toolkit session user"
+    else:
+        try:
+            from sgtk.authentication import DefaultsManager
+            login = DefaultsManager(fixed_host=tk.shotgun_url).get_login()
+        except Exception as exc:
+            return None, "could not read the Flow sign-in: %s" % exc
+        if not login:
+            return None, "nobody is signed in to Flow on this machine"
+        how = "Flow sign-in"
+    try:
+        hit = sg.find_one("HumanUser", [["login", "is", login]],
+                          ["id", "name", "login"])
+    except Exception as exc:
+        return None, "HumanUser lookup for %r failed: %s" % (login, exc)
+    if not hit or not hit.get("id"):
+        return None, "%s %r matches no HumanUser" % (how, login)
+    return hit, "%s %r" % (how, login)
+
+
 def run_render_complete(write_node):
     engine = sgtk.platform.current_engine()
     if engine is None:
@@ -410,22 +453,19 @@ def run_render_complete(write_node):
     # embedded timecode (handled gracefully downstream).
     start_tc = _read_embedded_start_tc(render_files, first_frame, render_work_template)
 
-    # The artist is the Flow (SGTK) user signed in to this session, NOT
-    # the workstation login: on this show the two differ (2026-10-15).
+    # The artist is the Flow user signed in on this machine, NOT the
+    # workstation login: on this show the two differ (2026-10-15).
     # user_id is what qt_watcher resolves for the manifest and Version.user.
-    sg_user = None
-    try:
-        sg_user = sgtk.util.get_current_user(tk)
-    except Exception as exc:
-        nuke.warning("[render_complete] Could not resolve the Flow user: %s" % exc)
-    if sg_user and sg_user.get("id"):
+    sg_user, artist_source = _flow_user(tk, sg)
+    if sg_user:
         artist = sg_user.get("name") or sg_user.get("login") or ""
         artist_user_id = sg_user["id"]
     else:
         artist = getpass.getuser()
         artist_user_id = None
-        nuke.warning("[render_complete] No Flow user for this session; flag "
-                     "carries workstation login %r and no user_id" % artist)
+        nuke.warning("[render_complete] No Flow user (%s); flag carries "
+                     "workstation login %r and no user_id"
+                     % (artist_source, artist))
 
     flag_data = {
         "project_id": ctx.project["id"] if ctx.project else None,
@@ -445,6 +485,7 @@ def run_render_complete(write_node):
         "output": output_name,
         "artist": artist,
         "user_id": artist_user_id,
+        "user_source": artist_source,
         "date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "frame_first": first_frame,
         "frame_last": last_frame,
