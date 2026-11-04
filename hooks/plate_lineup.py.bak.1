@@ -1,0 +1,594 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+plate_lineup.py -- "Plate Lineup (Flow)" for Nuke.
+
+STUDIO_PLATE_LINEUP_2026_11_02
+
+For a shot with more than one BG plate, pulls each plate's lineup data off
+Flow Production Tracking and (on request) builds the nodes that line each
+plate up against the shot:
+
+    sg_plt_lineup_frame_start / _end     where the plate sits
+    sg_plt_lineup_lfoa                   reported, checked against _end
+    plt_timewarp_keyframe_position_list  retime curve (shot frames)
+    plt_timewarp_keyframe_value_list     retime curve (plate frames)
+    sg_plt_camera_format, every other *plt* field   reported
+
+Which Flow entity carries these, and how it links to the Shot, is found
+from the schema by hooks/plate_sg.py and printed at the top of every
+report -- see that file to pin it.
+
+WHAT IT DOES
+------------
+1. Report (always): one block per plate, BG plates first, with every value
+   as stored on Flow and the interpretation that would be used to build.
+   Also printed to the Script Editor.
+2. Build Lineup Nodes (button): for each BG plate found on disk, under the
+   plate's Read (an existing Read of that sequence is reused; otherwise one
+   is made by plate_reads.make_read, exactly as Load Shot Plates would):
+
+       Read -> TimeOffset | TimeWarp -> FrameRange (shot sg_cut_in..out)
+
+   TimeWarp when Flow has timewarp keyframes, TimeOffset otherwise. The
+   nodes are tagged; running it again replaces this tool's nodes for that
+   plate and never touches anything else. Nothing is wired downstream.
+
+HOW THE NUMBERS ARE READ -- CHECK THIS ON THE FIRST REAL SHOT
+--------------------------------------------------------------
+Written without access to Flow, so the meaning of the lineup fields could
+not be confirmed from real data. The rules, all reported per plate:
+
+  * lineup start/end are PLATE frames (file numbering) that line up with
+    the shot's first frame, or SHOT frames where the plate's first frame
+    lands. LINEUP_FRAMES_ARE = "auto" decides from which range the numbers
+    fall in, and says so; when they fit both (plates and shots are both
+    numbered from 1001) it takes PLATE frames and says it was ambiguous.
+    Set it to "plate" or "shot" once known.
+  * Timewarp positions are SHOT frames, values are PLATE frames: Nuke's
+    TimeWarp lookup(output frame) = input frame. Positions that all fall
+    inside 0..shot length are taken as relative to the shot's first frame,
+    values inside 0..plate length as relative to the lineup start (or the
+    first frame on disk) -- and the report says when that happened.
+  * A lineup range whose length differs from the shot's is NOT turned into
+    a speed change; it is flagged. Only Flow's keyframes make a TimeWarp.
+
+Nuke knob names used (TimeOffset.time_offset, TimeWarp.lookup,
+FrameRange.first_frame/last_frame) are set inside try blocks; a failure is
+reported in the result rather than aborting the build.
+"""
+
+import importlib.util
+import os
+import sys
+
+MENU_LABEL = "Plate Lineup (Flow)"
+
+# "auto" | "plate" | "shot" -- see "HOW THE NUMBERS ARE READ" above.
+LINEUP_FRAMES_ARE = "auto"
+
+TAG_KNOB = "buf_plate_lineup"
+NODE_SPACING_Y = 70
+
+
+# ---------------------------------------------------------------------------
+# Sibling modules, loaded by path (hooks/ is not on sys.path)
+# ---------------------------------------------------------------------------
+
+def _load_sibling(name):
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, name + ".py")
+    if not os.path.isfile(path):
+        raise RuntimeError("%s.py not found next to plate_lineup.py (%s)"
+                           % (name, path))
+    module_name = "_buf_lineup_" + name
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# ---------------------------------------------------------------------------
+# Interpretation (no nuke -- testable)
+# ---------------------------------------------------------------------------
+
+def _within(values, lo, hi):
+    return lo is not None and hi is not None and all(lo <= v <= hi for v in values)
+
+
+def plan_plate(ps, plate, fields, shot_rng, disk_rng, mode=None):
+    """What to build for one plate, and every assumption made.
+
+    shot_rng / disk_rng: (first, last) or (None, None).
+    Returns dict: lineup_start/end, lfoa, keys, problems, notes,
+    kind ("timewarp"|"offset"|None), offset, tw_keys [(shot, plate)],
+    frame_range (first, last) or None, lineup_as ("plate"|"shot"|None).
+    """
+    mode = mode or LINEUP_FRAMES_ARE
+    sf, sl = shot_rng
+    df, dl = disk_rng
+    get = lambda logical: plate.get(fields[logical]) if fields.get(logical) else None
+    ls, le, lfoa = (ps.to_number(get("lineup_start")),
+                    ps.to_number(get("lineup_end")),
+                    ps.to_number(get("lfoa")))
+    pairs, kf_problem = ps.keyframes(plate, fields)
+
+    plan = {"lineup_start": ls, "lineup_end": le, "lfoa": lfoa,
+            "keys": pairs, "notes": [], "problems": [], "kind": None,
+            "offset": None, "tw_keys": [], "lineup_as": None,
+            "frame_range": (sf, sl) if sf is not None else None}
+    notes, problems = plan["notes"], plan["problems"]
+    if kf_problem:
+        problems.append(kf_problem)
+    if sf is None:
+        notes.append("Shot has no %s/%s on Flow -- no FrameRange, and "
+                     "relative keyframes cannot be placed."
+                     % (ps.SG_FRAME_IN_FIELD, ps.SG_FRAME_OUT_FIELD))
+    if df is None:
+        notes.append("Not found on disk under plates/ -- report only.")
+
+    # ---- which frames are the lineup numbers in?
+    if ls is not None:
+        span = [v for v in (ls, le) if v is not None]
+        in_shot = _within(span, sf, sl)
+        in_disk = _within(span, df, dl)
+        if mode in ("plate", "shot"):
+            as_ = mode
+            notes.append("Lineup read as %s frames (LINEUP_FRAMES_ARE)." % as_)
+        elif in_shot and not in_disk:
+            as_ = "shot"
+            notes.append("Lineup %s read as SHOT frames: inside the shot "
+                         "range, outside the plate's frames on disk." % _rng(ls, le))
+        elif in_disk and not in_shot:
+            as_ = "plate"
+            notes.append("Lineup %s read as PLATE frames: inside the "
+                         "plate's frames on disk, outside the shot range."
+                         % _rng(ls, le))
+        else:
+            as_ = "plate"
+            notes.append("Lineup %s fits %s -- AMBIGUOUS, read as PLATE "
+                         "frames. Set LINEUP_FRAMES_ARE in plate_lineup.py "
+                         "once confirmed." % (_rng(ls, le),
+                                              "both ranges" if in_shot else
+                                              "neither range"))
+        plan["lineup_as"] = as_
+
+        if le is not None and sf is not None and (le - ls) != (sl - sf):
+            notes.append("Lineup length %g frames vs shot %d frames -- NOT "
+                         "treated as a speed change; check it."
+                         % (le - ls + 1, sl - sf + 1))
+        if lfoa is not None and le is not None and lfoa != le:
+            notes.append("LFOA %g differs from lineup end %g." % (lfoa, le))
+
+        if as_ == "plate":
+            if sf is not None:
+                plan["offset"] = sf - ls
+        else:
+            if df is not None:
+                plan["offset"] = ls - df
+            else:
+                notes.append("Lineup is in shot frames but the plate is "
+                             "not on disk -- offset unknown.")
+    elif not pairs:
+        notes.append("No lineup start on Flow -- nothing to line up.")
+
+    # ---- timewarp
+    if pairs:
+        positions = [p for p, _ in pairs]
+        values = [v for _, v in pairs]
+        pos_base = 0
+        if sf is not None and not _within(positions, sf - 1000, sl + 1000) \
+                and _within(positions, 0, sl - sf + 1):
+            pos_base = sf
+            notes.append("Timewarp positions %s look relative -- added the "
+                         "shot's first frame %d." % (_rng(positions[0], positions[-1]), sf))
+        val_base = 0
+        if df is not None and not _within(values, df, dl) \
+                and _within(values, 0, dl - df + 1):
+            val_base = ls if (ls is not None and plan["lineup_as"] == "plate") else df
+            notes.append("Timewarp values look relative -- added %g (%s)."
+                         % (val_base, "lineup start" if val_base == ls
+                            else "first frame on disk"))
+        keys = [(p + pos_base, v + val_base) for p, v in pairs]
+        if df is not None:
+            outside = [v for _, v in keys if not df <= v <= dl]
+            if outside:
+                notes.append("%d timewarp value(s) fall outside the plate's "
+                             "frames on disk (%d-%d) -- they will read "
+                             "missing frames." % (len(outside), df, dl))
+        plan["tw_keys"] = keys
+        plan["kind"] = "timewarp"
+        if plan["offset"] is not None and sf is not None:
+            at_first = _lookup(keys, sf)
+            expected = sf - plan["offset"]
+            if at_first is not None and abs(at_first - expected) > 0.01:
+                notes.append("Timewarp gives plate frame %g at shot frame %d; "
+                             "the lineup start implies %g. The timewarp is "
+                             "what gets built." % (at_first, sf, expected))
+    elif plan["offset"] is not None:
+        plan["kind"] = "offset"
+    return plan
+
+
+def _lookup(keys, frame):
+    """Linear interpolation of the key list at frame (None outside it)."""
+    for (p0, v0), (p1, v1) in zip(keys, keys[1:]):
+        if p0 <= frame <= p1:
+            return v0 if p1 == p0 else v0 + (v1 - v0) * (frame - p0) / (p1 - p0)
+    if len(keys) == 1 and keys[0][0] == frame:
+        return keys[0][1]
+    return None
+
+
+def _rng(a, b):
+    if b is None or a == b:
+        return "%g" % a
+    return "%g-%g" % (a, b)
+
+
+# ---------------------------------------------------------------------------
+# Gathering
+# ---------------------------------------------------------------------------
+
+def gather(engine):
+    """Everything the report and the build need. Raises RuntimeError with an
+    artist-readable message when there is nothing to show."""
+    ps = _load_sibling("plate_sg")
+    pr = _load_sibling("plate_reads")
+    context = engine.context
+    if not (context and context.entity and context.entity.get("type") == "Shot"):
+        raise RuntimeError("Plate Lineup works in a Shot context.\n\n"
+                           "Current context: %s" % context)
+    sg = engine.shotgun
+    shot = context.entity
+    try:
+        data = ps.fetch_shot_plates(sg, shot)
+    except ps.PlateSGError as exc:
+        raise RuntimeError(str(exc))
+    shot_rng = ps.shot_range(sg, shot["id"])
+
+    plates_dir = pr.plates_dir_for_context(engine.sgtk, context)
+    records = []
+    if plates_dir and os.path.isdir(plates_dir):
+        records = pr.scan_plates(plates_dir, shot_code=shot.get("name"),
+                                 latest_only=True)
+
+    items = []
+    for plate in data["plates"]:
+        record, match_note = match_record(ps, plate, records)
+        disk = (record["first"], record["last"]) if record else (None, None)
+        plan = plan_plate(ps, plate, data["fields"], shot_rng, disk)
+        items.append({"plate": plate, "record": record,
+                      "match_note": match_note, "plan": plan,
+                      "bg": ps.bg_number(plate) is not None})
+    return {"ps": ps, "pr": pr, "shot": shot, "shot_range": shot_rng,
+            "plates_dir": plates_dir, "data": data, "items": items}
+
+
+def match_record(ps, plate, records):
+    """The on-disk plate record (latest delivery) for a Flow plate."""
+    code = ps.plate_code(plate)
+    key = ps.element_key(code)
+    if key is None:
+        return None, "code %r names no element (bg01, el02 ...)" % code
+    hits = [r for r in records if ps.element_key(r["element"]) == key]
+    if not hits:
+        return None, "no %s%02d folder under plates/" % key
+    if len(hits) > 1:
+        return hits[0], "%d sequences for %s%02d on disk; using %s" % (
+            len(hits), key[0], key[1], hits[0]["relpath"])
+    return hits[0], "on disk: %s" % hits[0]["relpath"]
+
+
+# ---------------------------------------------------------------------------
+# Report
+# ---------------------------------------------------------------------------
+
+def report_text(g):
+    ps, data = g["ps"], g["data"]
+    sf, sl = g["shot_range"]
+    lines = []
+    bgs = [i for i in g["items"] if i["bg"]]
+    lines.append("PLATE LINEUP -- %s" % g["shot"].get("name"))
+    lines.append("=" * len(lines[0]))
+    lines.append("Shot range   : %s" % ("%d-%d (sg_cut_in/out, handles incl.)"
+                                        % (sf, sl) if sf is not None else
+                                        "not set on Flow"))
+    lines.append("Plate entity : %s (%s) -- %s" % (
+        data["entity_name"], data["entity_type"], data["entity_how"]))
+    lines.append("Shot link    : %s.%s" % (
+        data["entity_type"] if data["link"][0] == "plate" else "Shot",
+        data["link"][1]))
+    lines.append("Plates folder: %s" % (g["plates_dir"] or "(not resolved)"))
+    if data["missing"]:
+        lines.append("NOT ON FLOW  : %s" % ", ".join(data["missing"]))
+    lines.append("Plates       : %d on Flow, %d BG" % (len(g["items"]), len(bgs)))
+    if len(bgs) < 2:
+        lines.append("NOTE: this shot has %s BG plate%s on Flow."
+                     % ("no" if not bgs else "one", "" if len(bgs) == 1 else "s"))
+
+    shown = set(f for f in data["fields"].values() if f)
+    for item in g["items"]:
+        plate, plan = item["plate"], item["plan"]
+        lines.append("")
+        head = "%s%s" % (ps.plate_code(plate), "" if item["bg"] else "   (not BG)")
+        lines.append(head)
+        lines.append("-" * len(head))
+        for logical, given in ps.LINEUP_FIELDS.items():
+            field = data["fields"].get(logical)
+            value = ps.display_value(plate.get(field)) if field else "(no such field)"
+            lines.append("  %-38s %s" % (field or given, value))
+        for field in data["extra"]:
+            if field in shown or field == "code":
+                continue
+            value = plate.get(field)
+            if value in (None, "", []):
+                continue
+            lines.append("  %-38s %s" % (field, ps.display_value(value)))
+        lines.append("  %-38s %s" % ("disk", item["match_note"]))
+        if item["record"]:
+            lines.append("  %-38s %d-%d" % ("frames on disk", item["record"]["first"],
+                                            item["record"]["last"]))
+        if plan["kind"] == "timewarp":
+            lines.append("  BUILD: TimeWarp, %d key%s (shot -> plate): %s" % (
+                len(plan["tw_keys"]), "" if len(plan["tw_keys"]) == 1 else "s",
+                ", ".join("%g->%g" % k for k in plan["tw_keys"][:8])
+                + (" ..." if len(plan["tw_keys"]) > 8 else "")))
+        elif plan["kind"] == "offset":
+            lines.append("  BUILD: TimeOffset %+d (plate frame %g at shot frame %g)"
+                         % (plan["offset"], _plate_at_shot_start(plan, g),
+                            sf if sf is not None else float("nan")))
+        else:
+            lines.append("  BUILD: nothing (no usable lineup)")
+        for problem in plan["problems"]:
+            lines.append("  ! %s" % problem)
+        for note in plan["notes"]:
+            lines.append("  - %s" % note)
+    return "\n".join(lines)
+
+
+def _plate_at_shot_start(plan, g):
+    sf = g["shot_range"][0]
+    if sf is None or plan["offset"] is None:
+        return float("nan")
+    return sf - plan["offset"]
+
+
+# ---------------------------------------------------------------------------
+# Building (needs nuke)
+# ---------------------------------------------------------------------------
+
+def _tag(node, code, summary):
+    import nuke
+    try:
+        if TAG_KNOB not in node.knobs():
+            node.addKnob(nuke.Tab_Knob("buf_lineup_tab", "Lineup"))
+            knob = nuke.String_Knob(TAG_KNOB, "Flow plate")
+            node.addKnob(knob)
+            node.addKnob(nuke.Text_Knob("buf_lineup_info", "", summary))
+        node[TAG_KNOB].setValue(code)
+    except Exception as exc:
+        print("[plate_lineup] could not tag %s: %s" % (node.name(), exc))
+
+
+def _set(node, knob, value, failures):
+    try:
+        node[knob].setValue(value)
+        return True
+    except Exception as exc:
+        failures.append("%s.%s: %s" % (node.Class(), knob, exc))
+        return False
+
+
+def _existing_read(record):
+    import nuke
+    want = os.path.normpath(record["nuke_path"].replace("\\", "/"))
+    for node in nuke.allNodes("Read"):
+        try:
+            if os.path.normpath(node["file"].value()) == want:
+                return node
+        except Exception:
+            continue
+    return None
+
+
+def _remove_previous(code):
+    import nuke
+    removed = 0
+    for node in nuke.allNodes(recurseGroups=False):
+        try:
+            if TAG_KNOB in node.knobs() and node[TAG_KNOB].value() == code \
+                    and node.Class() != "Read":
+                nuke.delete(node)
+                removed += 1
+        except Exception:
+            continue
+    return removed
+
+
+def build_nodes(g, bg_only=True):
+    """Build the lineup nodes. Returns a list of result lines."""
+    import nuke
+    ps, pr = g["ps"], g["pr"]
+    results = []
+    for item in g["items"]:
+        if bg_only and not item["bg"]:
+            continue
+        code, plan, record = ps.plate_code(item["plate"]), item["plan"], item["record"]
+        if record is None:
+            results.append("%s: skipped -- %s" % (code, item["match_note"]))
+            continue
+        if plan["kind"] is None:
+            results.append("%s: skipped -- no usable lineup on Flow" % code)
+            continue
+
+        for selected in nuke.selectedNodes():
+            selected.setSelected(False)
+        read = _existing_read(record)
+        read_note = "existing Read %s" % read.name() if read else None
+        if read is None:
+            read = pr.make_read(record, primary=False,
+                                note="lineup: %s" % code)
+            read_note = "new Read %s" % read.name()
+        removed = _remove_previous(code)
+
+        failures = []
+        summary = report_line(plan)
+        x, y = read.xpos(), read.ypos() + NODE_SPACING_Y + 30
+        if plan["kind"] == "timewarp":
+            retime = nuke.nodes.TimeWarp()
+            try:
+                lookup = retime["lookup"]
+                lookup.setAnimated()
+                for shot_frame, plate_frame in plan["tw_keys"]:
+                    lookup.setValueAt(plate_frame, shot_frame)
+                anim = lookup.animation(0)
+                anim.changeInterpolation(anim.keys(), nuke.LINEAR)
+            except Exception as exc:
+                failures.append("TimeWarp.lookup: %s" % exc)
+        else:
+            retime = nuke.nodes.TimeOffset()
+            _set(retime, "time_offset", plan["offset"], failures)
+        retime.setInput(0, read)
+        retime.setXYpos(x, y)
+        retime["label"].setValue("LINEUP %s\n%s" % (code, summary))
+        _tag(retime, code, summary)
+        built = [retime.name()]
+
+        if plan["frame_range"]:
+            fr = nuke.nodes.FrameRange()
+            _set(fr, "first_frame", plan["frame_range"][0], failures)
+            _set(fr, "last_frame", plan["frame_range"][1], failures)
+            fr.setInput(0, retime)
+            fr.setXYpos(x, y + NODE_SPACING_Y)
+            fr["label"].setValue("shot %d-%d" % plan["frame_range"])
+            _tag(fr, code, summary)
+            built.append(fr.name())
+
+        line = "%s: %s -> %s%s" % (code, read_note, " -> ".join(built),
+                                   " (replaced %d old)" % removed if removed else "")
+        if failures:
+            line += "\n    COULD NOT SET: %s" % "; ".join(failures)
+        results.append(line)
+    return results or ["No BG plates to build."]
+
+
+def report_line(plan):
+    if plan["kind"] == "timewarp":
+        return "TimeWarp %d keys" % len(plan["tw_keys"])
+    if plan["kind"] == "offset":
+        return "offset %+d (lineup %s as %s frames)" % (
+            plan["offset"], _rng(plan["lineup_start"], plan["lineup_end"]),
+            plan["lineup_as"])
+    return "no lineup"
+
+
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
+
+def _qt():
+    try:
+        from PySide6 import QtWidgets, QtGui
+    except ImportError:
+        from PySide2 import QtWidgets, QtGui
+    return QtWidgets, QtGui
+
+
+def _show_dialog(text, on_build):
+    QtWidgets, QtGui = _qt()
+    dialog = QtWidgets.QDialog()
+    dialog.setWindowTitle(MENU_LABEL)
+    dialog.resize(900, 640)
+    layout = QtWidgets.QVBoxLayout(dialog)
+    view = QtWidgets.QPlainTextEdit()
+    view.setReadOnly(True)
+    view.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+    font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
+    view.setFont(font)
+    view.setPlainText(text)
+    layout.addWidget(view)
+    row = QtWidgets.QHBoxLayout()
+    build = QtWidgets.QPushButton("Build Lineup Nodes (BG plates)")
+    copy = QtWidgets.QPushButton("Copy Report")
+    close = QtWidgets.QPushButton("Close")
+    row.addWidget(build)
+    row.addWidget(copy)
+    row.addStretch(1)
+    row.addWidget(close)
+    layout.addLayout(row)
+
+    def _build():
+        result = on_build()
+        view.appendPlainText("\n\nBUILD\n-----\n" + "\n".join(result))
+        build.setEnabled(False)
+
+    build.clicked.connect(_build)
+    copy.clicked.connect(
+        lambda: QtWidgets.QApplication.clipboard().setText(view.toPlainText()))
+    close.clicked.connect(dialog.accept)
+    dialog.exec_() if hasattr(dialog, "exec_") else dialog.exec()
+
+
+def _run():
+    import nuke
+    import sgtk
+
+    engine = sgtk.platform.current_engine()
+    if engine is None:
+        nuke.message("Flow Production Tracking is not running in this session.")
+        return
+    try:
+        g = gather(engine)
+    except Exception as exc:
+        nuke.message("Plate Lineup:\n\n%s" % exc)
+        return
+    text = report_text(g)
+    print("\n" + text + "\n")
+
+    def on_build():
+        undo = nuke.Undo()
+        undo.begin("Plate Lineup")
+        try:
+            result = build_nodes(g)
+        except Exception as exc:
+            result = ["Build failed: %s" % exc]
+        finally:
+            undo.end()
+        print("\n".join(result))
+        return result
+
+    try:
+        _show_dialog(text, on_build)
+    except Exception as exc:
+        print("[plate_lineup] dialog unavailable (%s); using nuke.ask" % exc)
+        if nuke.ask("%s\n\nBuild lineup nodes for the BG plates?"
+                    % text[:3000]):
+            nuke.message("\n".join(on_build()))
+
+
+def _reload_self():
+    """Re-exec this file from disk so a menu click always runs current code
+    (same reason as dailies_viewer._reload_self)."""
+    spec = importlib.util.spec_from_file_location("plate_lineup",
+                                                  os.path.abspath(__file__))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cmd_plate_lineup():
+    _reload_self()._run()
+
+
+def register(engine):
+    """Register with Flow Production Tracking > Buffalo VFX (filed there by
+    hooks/buffalo_menu.py; position set by its _LAYOUT)."""
+    engine.register_command(
+        MENU_LABEL,
+        cmd_plate_lineup,
+        {"short_name": "plate_lineup",
+         "description": "Show Flow's lineup / timewarp data for this shot's "
+                        "plates and build TimeOffset/TimeWarp nodes that "
+                        "line each BG plate up with the shot."},
+    )

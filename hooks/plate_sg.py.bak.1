@@ -1,0 +1,548 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+plate_sg.py -- the shot's plate records on Flow Production Tracking.
+
+STUDIO_PLATE_SG_2026_11_02
+
+Shared by two Nuke commands, so they can never disagree about which Flow
+record is "the plate":
+
+  * hooks/plate_lineup.py   -- "Plate Lineup (Flow)": the lineup / retime
+                               data for every BG plate of the shot.
+  * hooks/dailies_viewer.py -- the Input Process colour viewer takes its
+                               camera from the BG01 plate's
+                               sg_plt_camera_format.
+
+No nuke import: everything here runs against any shotgun_api3-like object,
+so it can be tested off a fake.
+
+WHICH ENTITY IS "THE PLATE" -- DISCOVERED, NOT ASSUMED
+------------------------------------------------------
+The plate fields (sg_plt_lineup_frame_start etc.) live on a custom entity
+whose CustomEntityNN slot was not visible from where this was written
+(Flow was unreachable). So the entity type is found from the schema at
+run time: the first entity type that carries PLATE_MARKER_FIELD. Pin it
+with PLATE_ENTITY_TYPE below (or the BUF_PLATE_ENTITY environment variable)
+once it is known, and the schema scan is skipped. Every run reports which
+entity and which Shot-link field it used.
+
+The link to the Shot is found the same way: an entity / multi-entity field
+on the plate whose valid types include Shot (names in SHOT_LINK_PREFERENCE
+first). If the plate has none, a multi-entity field on the Shot pointing at
+the plate entity is used instead.
+
+FIELD NAMES -- WITH OR WITHOUT THE sg_ PREFIX
+---------------------------------------------
+Flow gives every custom field an sg_ prefix, but the names as handed over
+mix both spellings (sg_plt_lineup_frame_start, plt_timewarp_keyframe_...).
+resolve_field() accepts either and reports what it actually matched. A
+field the schema does not have is reported as missing, never invented.
+"""
+
+import os
+import re
+import sys
+import types
+
+# ---------------------------------------------------------------------------
+# Settings -- change these, not the code
+# ---------------------------------------------------------------------------
+
+# e.g. "CustomEntity05". None = find it from the schema (see above).
+PLATE_ENTITY_TYPE = None
+PLATE_ENTITY_ENV = "BUF_PLATE_ENTITY"
+
+# A field only the plate entity has. Used to recognise it in the schema.
+PLATE_MARKER_FIELD = "sg_plt_lineup_frame_start"
+
+# Plate -> Shot link fields, most likely first. Any other entity /
+# multi_entity field whose valid types include Shot is used after these.
+SHOT_LINK_PREFERENCE = ("sg_shot", "shot", "sg_shots", "shots", "entity",
+                        "sg_link", "sg_entity")
+
+# Logical name -> the name as given. Resolved with or without "sg_".
+LINEUP_FIELDS = {
+    "lineup_start": "sg_plt_lineup_frame_start",
+    "lineup_end": "sg_plt_lineup_frame_end",
+    "lfoa": "sg_plt_lineup_lfoa",
+    "tw_values": "plt_timewarp_keyframe_value_list",
+    "tw_positions": "plt_timewarp_keyframe_position_list",
+    "camera_format": "sg_plt_camera_format",
+}
+
+# Shown alongside the lineup fields whenever the plate entity has them.
+# Every other field whose code contains "plt" is shown too (see
+# extra_plate_fields), so a field added on Flow later appears with no
+# change here.
+GENERAL_FIELDS = ("code", "description", "sg_status_list", "created_at",
+                  "updated_at")
+
+# Shot range. sg_cut_in/out INCLUDE the handles on this show (same fields,
+# same meaning as scene_operation_tk-nuke.py SG_FRAME_IN/OUT_FIELD).
+SG_FRAME_IN_FIELD = "sg_cut_in"
+SG_FRAME_OUT_FIELD = "sg_cut_out"
+
+# The same BG01 rule scene_operation_tk-nuke.py uses for the frame range
+# (FRAME_RANGE_PLATE_RE): bg01, BG01, BG1, bg001 -- not bg010, bg11, bg02.
+BG01_RE = re.compile(r"(?<![a-z0-9])bg0*1(?![0-9])", re.IGNORECASE)
+# Any BG element: bg01, BG2, bg003 ...
+BG_RE = re.compile(r"(?<![a-z0-9])bg(?P<num>\d+)(?![0-9])", re.IGNORECASE)
+# Element token for matching a Flow plate to a folder on disk.
+ELEMENT_RE = re.compile(r"(?<![a-z0-9])(?P<kind>[a-z]{2,4}?)(?P<num>\d{1,3})(?![0-9])",
+                        re.IGNORECASE)
+VERSION_RE = re.compile(r"_v(?P<v>\d+)(?![0-9])", re.IGNORECASE)
+
+_NUMBER_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
+
+
+class PlateSGError(RuntimeError):
+    """Flow could not be read in a way that makes an answer possible."""
+
+
+# ---------------------------------------------------------------------------
+# Session cache (survives this file being re-executed on every menu click)
+# ---------------------------------------------------------------------------
+
+def _cache():
+    name = "_buf_plate_sg_cache"
+    module = sys.modules.get(name)
+    if module is None:
+        module = types.ModuleType(name)
+        module.data = {}
+        sys.modules[name] = module
+    return module.data
+
+
+def clear_cache():
+    _cache().clear()
+
+
+# ---------------------------------------------------------------------------
+# Schema
+# ---------------------------------------------------------------------------
+
+def _field_schema(sg, entity_type):
+    key = ("fields", entity_type)
+    cache = _cache()
+    if key not in cache:
+        cache[key] = sg.schema_field_read(entity_type)
+    return cache[key]
+
+
+def _valid_types(info):
+    props = info.get("properties") or {}
+    return list(((props.get("valid_types") or {}).get("value")) or [])
+
+
+def _data_type(info):
+    return ((info.get("data_type") or {}).get("value")) or ""
+
+
+def _display(entity_info, entity_type):
+    try:
+        return entity_info[entity_type]["name"]["value"]
+    except Exception:
+        return entity_type
+
+
+def find_plate_entity(sg):
+    """(entity_type, display_name, how) for the plate entity.
+
+    Raises PlateSGError if no entity carries PLATE_MARKER_FIELD.
+    """
+    cache = _cache()
+    if "plate_entity" in cache:
+        return cache["plate_entity"]
+
+    pinned = os.environ.get(PLATE_ENTITY_ENV) or PLATE_ENTITY_TYPE
+    try:
+        entities = sg.schema_entity_read()
+    except Exception as exc:
+        raise PlateSGError("Could not read the Flow entity list: %s" % exc)
+
+    if pinned:
+        if pinned not in entities:
+            raise PlateSGError(
+                "Plate entity is pinned to %r (%s) but Flow has no such "
+                "entity type." % (pinned, "env %s" % PLATE_ENTITY_ENV
+                                  if os.environ.get(PLATE_ENTITY_ENV)
+                                  else "PLATE_ENTITY_TYPE in plate_sg.py"))
+        result = (pinned, _display(entities, pinned), "pinned")
+        cache["plate_entity"] = result
+        return result
+
+    # Custom entities first: that is where a studio plate entity lives, and
+    # it keeps the scan short.
+    order = sorted(entities, key=lambda et: (not et.startswith("CustomEntity"), et))
+    marker_variants = _name_variants(PLATE_MARKER_FIELD)
+    for entity_type in order:
+        try:
+            fields = _field_schema(sg, entity_type)
+        except Exception:
+            continue
+        if any(v in fields for v in marker_variants):
+            result = (entity_type, _display(entities, entity_type),
+                      "found by schema scan (has %s)" % PLATE_MARKER_FIELD)
+            cache["plate_entity"] = result
+            return result
+    raise PlateSGError(
+        "No Flow entity has a field called %s. Check the field name, or pin "
+        "the entity with PLATE_ENTITY_TYPE in hooks/plate_sg.py."
+        % PLATE_MARKER_FIELD)
+
+
+def _name_variants(name):
+    bare = name[3:] if name.startswith("sg_") else name
+    return (name, "sg_" + bare, bare)
+
+
+def resolve_field(fields_schema, given):
+    """The field code the schema actually has for `given`, or None."""
+    for variant in _name_variants(given):
+        if variant in fields_schema:
+            return variant
+    return None
+
+
+def resolve_fields(sg, plate_type):
+    """{logical: field code or None} for LINEUP_FIELDS on the plate entity."""
+    schema = _field_schema(sg, plate_type)
+    return {logical: resolve_field(schema, given)
+            for logical, given in LINEUP_FIELDS.items()}
+
+
+def extra_plate_fields(sg, plate_type, already=()):
+    """Every other field on the plate whose code mentions 'plt', plus
+    GENERAL_FIELDS that exist. Sorted, without duplicates of `already`."""
+    schema = _field_schema(sg, plate_type)
+    skip = set(f for f in already if f)
+    out = [f for f in GENERAL_FIELDS if f in schema and f not in skip]
+    skip.update(out)
+    out += sorted(f for f in schema if "plt" in f.lower() and f not in skip)
+    return out
+
+
+def field_label(sg, plate_type, field):
+    try:
+        return _field_schema(sg, plate_type)[field]["name"]["value"]
+    except Exception:
+        return field
+
+
+def find_shot_link(sg, plate_type):
+    """How plates hang off a Shot.
+
+    Returns ("plate", field) when the plate has a field pointing at Shot,
+    ("shot", field) when the Shot has a multi-entity field pointing at the
+    plate entity. Raises PlateSGError if neither exists.
+    """
+    cache = _cache()
+    key = ("link", plate_type)
+    if key in cache:
+        return cache[key]
+
+    schema = _field_schema(sg, plate_type)
+    candidates = [f for f, info in schema.items()
+                  if _data_type(info) in ("entity", "multi_entity")
+                  and "Shot" in _valid_types(info)]
+    if candidates:
+        ranked = sorted(candidates, key=lambda f: (
+            SHOT_LINK_PREFERENCE.index(f) if f in SHOT_LINK_PREFERENCE
+            else len(SHOT_LINK_PREFERENCE), f))
+        cache[key] = ("plate", ranked[0])
+        return cache[key]
+
+    shot_schema = _field_schema(sg, "Shot")
+    reverse = sorted(f for f, info in shot_schema.items()
+                     if _data_type(info) in ("entity", "multi_entity")
+                     and plate_type in _valid_types(info))
+    if reverse:
+        cache[key] = ("shot", reverse[0])
+        return cache[key]
+
+    raise PlateSGError(
+        "The plate entity %s has no field linking it to a Shot, and no Shot "
+        "field links to it." % plate_type)
+
+
+# ---------------------------------------------------------------------------
+# Querying
+# ---------------------------------------------------------------------------
+
+def shot_range(sg, shot_id):
+    """(first, last) from Shot sg_cut_in / sg_cut_out (handles included),
+    or (None, None)."""
+    shot = sg.find_one("Shot", [["id", "is", shot_id]],
+                       [SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD]) or {}
+    first, last = shot.get(SG_FRAME_IN_FIELD), shot.get(SG_FRAME_OUT_FIELD)
+    try:
+        first, last = int(first), int(last)
+    except (TypeError, ValueError):
+        return None, None
+    if last < first:
+        return None, None
+    return first, last
+
+
+def fetch_shot_plates(sg, shot):
+    """All plate records linked to `shot` ({"type": "Shot", "id": ...}).
+
+    Returns a dict:
+        entity_type, entity_name, entity_how   which entity, and why
+        link                                    ("plate"|"shot", field)
+        fields      {logical: code or None}     LINEUP_FIELDS resolved
+        missing     [given names not on Flow]
+        extra       [other plt fields fetched]
+        plates      [plate dicts, sorted bg first]
+    """
+    plate_type, plate_name, how = find_plate_entity(sg)
+    fields = resolve_fields(sg, plate_type)
+    missing = [LINEUP_FIELDS[k] for k, v in fields.items() if not v]
+    extra = extra_plate_fields(sg, plate_type, already=fields.values())
+    wanted = sorted(set([f for f in fields.values() if f] + extra + ["code"]))
+
+    side, link_field = find_shot_link(sg, plate_type)
+    shot_ref = {"type": "Shot", "id": shot["id"]}
+    if side == "plate":
+        plates = sg.find(plate_type, [[link_field, "is", shot_ref]], wanted)
+    else:
+        row = sg.find_one("Shot", [["id", "is", shot["id"]]], [link_field]) or {}
+        linked = row.get(link_field) or []
+        if isinstance(linked, dict):
+            linked = [linked]
+        ids = [e["id"] for e in linked if e.get("type") == plate_type]
+        plates = (sg.find(plate_type, [["id", "in", ids]], wanted)
+                  if ids else [])
+
+    plates = sorted(plates or [], key=plate_sort_key)
+    return {
+        "entity_type": plate_type,
+        "entity_name": plate_name,
+        "entity_how": how,
+        "link": (side, link_field),
+        "fields": fields,
+        "missing": missing,
+        "extra": extra,
+        "plates": plates,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Plate identity
+# ---------------------------------------------------------------------------
+
+def plate_code(plate):
+    return str(plate.get("code") or plate.get("name") or "#%s" % plate.get("id"))
+
+
+def bg_number(plate):
+    """2 for '301_017_0010_BG02', None if the code names no BG element."""
+    match = BG_RE.search(plate_code(plate))
+    return int(match.group("num")) if match else None
+
+
+def is_bg01(plate):
+    return bool(BG01_RE.search(plate_code(plate)))
+
+
+def code_version(code):
+    match = VERSION_RE.search(code or "")
+    return int(match.group("v")) if match else 0
+
+
+def plate_sort_key(plate):
+    """BG plates first in number order, newest version / record first."""
+    num = bg_number(plate)
+    code = plate_code(plate)
+    return (num is None, num if num is not None else 0, code.lower(),
+            -code_version(code), -(plate.get("id") or 0))
+
+
+def element_key(name):
+    """('bg', 2) for 'BG02', 'bg2', '301_017_0010_bg02_v03'; None if no
+    element token. Used to pair a Flow plate with a folder on disk."""
+    if not name:
+        return None
+    # First element-shaped token; a _v02 suffix never matches (one letter).
+    for match in ELEMENT_RE.finditer(name):
+        return (match.group("kind").lower(), int(match.group("num")))
+    return None
+
+
+def pick_bg01(plates):
+    """(plate or None, note). Highest version / newest record wins if Flow
+    has more than one BG01 for the shot, and the note says so."""
+    hits = [p for p in plates if is_bg01(p)]
+    if not hits:
+        return None, "no plate on Flow whose code names BG01"
+    hits.sort(key=lambda p: (code_version(plate_code(p)), p.get("id") or 0),
+              reverse=True)
+    note = "BG01 plate %s" % plate_code(hits[0])
+    if len(hits) > 1:
+        note += " (newest of %d: %s)" % (
+            len(hits), ", ".join(plate_code(p) for p in hits))
+    return hits[0], note
+
+
+# ---------------------------------------------------------------------------
+# Values
+# ---------------------------------------------------------------------------
+
+def to_number(value):
+    """float/int from a Flow value (number, numeric text), else None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    found = _NUMBER_RE.findall(str(value))
+    if len(found) != 1:
+        return None
+    number = float(found[0])
+    return int(number) if number.is_integer() else number
+
+
+def parse_number_list(value):
+    """[1001.0, 1010.5, ...] from a list, or text separated by commas,
+    spaces, semicolons, brackets or newlines. [] for empty."""
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            out.extend(parse_number_list(item))
+        return out
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    if isinstance(value, dict):
+        return parse_number_list(value.get("name"))
+    return [float(n) for n in _NUMBER_RE.findall(str(value))]
+
+
+def display_value(value):
+    """Short human text for any Flow field value."""
+    if value is None or value == "" or value == []:
+        return "-"
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("code") or value.get("id"))
+    if isinstance(value, (list, tuple)):
+        return ", ".join(display_value(v) for v in value)
+    return str(value)
+
+
+def keyframes(plate, fields):
+    """(pairs, problem). pairs = sorted [(position, value), ...] from the
+    timewarp lists; problem = text when the lists cannot be paired."""
+    pos_field, val_field = fields.get("tw_positions"), fields.get("tw_values")
+    if not pos_field or not val_field:
+        return [], None
+    positions = parse_number_list(plate.get(pos_field))
+    values = parse_number_list(plate.get(val_field))
+    if not positions and not values:
+        return [], None
+    if len(positions) != len(values):
+        return [], ("timewarp lists differ in length: %d positions, %d "
+                    "values -- not used" % (len(positions), len(values)))
+    pairs = sorted(zip(positions, values))
+    seen = set()
+    for position, _ in pairs:
+        if position in seen:
+            return [], ("timewarp position %g appears twice -- not used"
+                        % position)
+        seen.add(position)
+    return pairs, None
+
+
+# ---------------------------------------------------------------------------
+# camera_format -> a camera the QT bake knows
+# ---------------------------------------------------------------------------
+
+def _norm(text):
+    return re.sub(r"[\s_\-./]+", " ", str(text or "").strip().lower()).strip()
+
+
+def camera_from_format(camera_format, alias_families):
+    """(camera alias or None, reason).
+
+    alias_families: the bake's own alias tuples -- pass
+    qt_bake_oiio.CAMERA_LOG_SPACES.keys() -- so no list is copied here.
+    The answer is the family's first alias ('arri', 'red', 'sony', 'dji'),
+    which resolve_show_lut() and resolve_log_space() both accept.
+
+    An exact alias match wins. Otherwise any alias that appears as a whole
+    word in the format ("ARRI ALEXA 35 4.6K 3:2 Open Gate" -> arri). Two
+    families in one format is ambiguous and returns None, as does no match.
+    """
+    families = [tuple(f) for f in alias_families]
+    raw = display_value(camera_format) if camera_format not in (None, "") else ""
+    if not raw or raw == "-":
+        return None, "sg_plt_camera_format is empty"
+    norm = _norm(raw)
+    squashed = norm.replace(" ", "")
+
+    for family in families:
+        if norm in family or squashed in family:
+            return family[0], "camera format %r is the alias %r" % (raw, norm)
+
+    hits = {}
+    for family in families:
+        for alias in family:
+            a = _norm(alias)
+            if not a:
+                continue
+            if re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(a), norm):
+                hits.setdefault(family[0], []).append(alias)
+    if len(hits) == 1:
+        camera, words = list(hits.items())[0]
+        return camera, "camera format %r names %s -> %s" % (
+            raw, "/".join(sorted(set(words))), camera)
+    if len(hits) > 1:
+        return None, ("camera format %r matches more than one camera (%s) -- "
+                      "not guessing" % (raw, ", ".join(
+                          "%s via %s" % (c, "/".join(w))
+                          for c, w in sorted(hits.items()))))
+    return None, ("camera format %r matches no camera the QT bake knows (%s)"
+                  % (raw, ", ".join(f[0] for f in families)))
+
+
+def bg01_camera(sg, shot, alias_families):
+    """Everything the colour viewer needs from Flow about the camera.
+
+    Returns a dict, never raises:
+        camera     alias for the bake, or "" (bake's ARRI default)
+        format     the raw sg_plt_camera_format value, or None
+        plate      BG01 plate code, or None
+        reasons    [lines to show the artist]
+    """
+    out = {"camera": "", "format": None, "plate": None, "reasons": []}
+    try:
+        data = fetch_shot_plates(sg, shot)
+    except Exception as exc:
+        out["reasons"].append(
+            "Camera: could not read plates from Flow (%s) -- using the bake "
+            "default (ARRI)." % exc)
+        return out
+    field = data["fields"].get("camera_format")
+    if not field:
+        out["reasons"].append(
+            "Camera: the plate entity %s has no %s field -- using the bake "
+            "default (ARRI)." % (data["entity_type"],
+                                 LINEUP_FIELDS["camera_format"]))
+        return out
+    plate, note = pick_bg01(data["plates"])
+    if plate is None:
+        out["reasons"].append("Camera: %s (%d plate%s on Flow for this shot) "
+                              "-- using the bake default (ARRI)."
+                              % (note, len(data["plates"]),
+                                 "" if len(data["plates"]) == 1 else "s"))
+        return out
+    out["plate"] = plate_code(plate)
+    out["format"] = plate.get(field)
+    camera, why = camera_from_format(out["format"], alias_families)
+    if camera:
+        out["camera"] = camera
+        out["reasons"].append("Camera: %s; %s." % (note, why))
+    else:
+        out["reasons"].append("Camera: %s; %s -- using the bake default "
+                              "(ARRI), WHICH MAY BE THE WRONG LOOK."
+                              % (note, why))
+    return out

@@ -124,6 +124,10 @@ settings.tk-multi-shotgunpanel.blender:
 
 # nuke
 settings.tk-multi-shotgunpanel.nuke:
+  # STUDIO_PANEL_PLATE_FIELDS_2026_11_03: plate fields on Versions (hooks/tk-multi-shotgunpanel/buf_shotgun_fields.py)
+  shotgun_fields_hook: "{self}/shotgun_fields.py:{config}/tk-multi-shotgunpanel/buf_shotgun_fields.py"
+  # STUDIO_PANEL_TASK_PLATES_2026_11_03: shot plates on a Task's Versions tab (hooks/tk-multi-shotgunpanel/buf_shotgun_filters.py)
+  shotgun_filters_hook: "{self}/shotgun_filters.py:{config}/tk-multi-shotgunpanel/buf_shotgun_filters.py"
   action_mappings:
     PublishedFile:
     - actions: [read_node]

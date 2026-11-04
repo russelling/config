@@ -1,0 +1,155 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+buf_shotgun_fields.py -- Flow Production Tracking panel: plate details.
+
+STUDIO_PANEL_PLATE_FIELDS_2026_11_03
+STUDIO_PANEL_COMPACT_PLATES_2026_11_03
+
+Inherits the panel's own hook ({self}/shotgun_fields.py) and only adds to
+it, for Version -- which is where this show's plates live (confirmed
+2026-11-03: plates are Versions linked by Version.entity, carrying the
+sg_plt_* fields). Wired in env/includes/settings/tk-multi-shotgunpanel.yml
+under settings.tk-multi-shotgunpanel.nuke:
+
+    shotgun_fields_hook: "{self}/shotgun_fields.py:{config}/tk-multi-shotgunpanel/buf_shotgun_fields.py"
+
+What changes in the panel:
+  * Versions list (Shot or Task): a plate Version shows two short lines
+    FIRST -- "<description>  Lineup 1001-1029" and "Action 1009-1021  H 8/8"
+    -- then the stock "By" line. A list row is a fixed 102 px in the panel's
+    own code (ListItemWidget.calculate_size), about three lines of text, so
+    the list carries only what fits; click a plate for the full block.
+  * Version header (click a plate): the same block, plus camera format,
+    camera roll, timecodes, scene/take and effect instructions.
+  * Version > Info tab: every sg_plt_* field the schema has.
+
+Every line uses the panel's {[pre]field[post]} form, so a Version without
+plate fields (a render, a daily) looks exactly as before.
+
+Only fields that exist on Version are ever referenced: the panel puts every
+{token} into its Flow query, and one unknown field would break the query
+for every Version. The schema is read once per session; if it cannot be
+read, the stock definitions are returned unchanged.
+
+This shows Flow's numbers AS STORED. It does not do the placement maths --
+a plate delivered short of its head handle (EL03 on 302_038_0040) still
+shows lineup start as Flow has it. "Plate Lineup (Flow)" in the Buffalo VFX
+menu is the place for the worked-out lineup.
+"""
+
+import sgtk
+
+HookBaseClass = sgtk.get_hook_baseclass()
+
+_SCHEMA_CACHE = {}
+
+
+class BufShotgunFields(HookBaseClass):
+
+    # -- schema guard ---------------------------------------------------
+
+    def _version_fields(self):
+        """Set of Version field codes, or None if the schema can't be read."""
+        if "Version" not in _SCHEMA_CACHE:
+            try:
+                _SCHEMA_CACHE["Version"] = set(
+                    self.parent.shotgun.schema_field_read("Version"))
+            except Exception as exc:
+                self.parent.logger.warning(
+                    "buf_shotgun_fields: could not read the Version schema "
+                    "(%s) -- plate fields not shown." % exc)
+                _SCHEMA_CACHE["Version"] = None
+        return _SCHEMA_CACHE["Version"]
+
+    def _lines(self, rows):
+        """Template text for the rows whose fields all exist.
+        rows: [(template, (field, ...)), ...]"""
+        have = self._version_fields()
+        if not have:
+            return ""
+        return "".join(t for t, fields in rows if all(f in have for f in fields))
+
+    # Short plate block, used in the Versions list and the header.
+    def _plate_summary(self):
+        return self._lines([
+            ("{[<br><b>Plate: </b>]sg_plt_plate_description}",
+             ("sg_plt_plate_description",)),
+            ("{[<br><b>Lineup: </b>]sg_plt_lineup_frame_start}"
+             "{[-]sg_plt_lineup_frame_end}",
+             ("sg_plt_lineup_frame_start", "sg_plt_lineup_frame_end")),
+            ("{[  <b>Action: </b>]sg_plt_lineup_ffoa}{[-]sg_plt_lineup_lfoa}",
+             ("sg_plt_lineup_ffoa", "sg_plt_lineup_lfoa")),
+            ("{[  <b>Handles: </b>]sg_plt_handle_head}{[/]sg_plt_handle_tail}",
+             ("sg_plt_handle_head", "sg_plt_handle_tail")),
+        ])
+
+    # -- panel hook methods ---------------------------------------------
+
+    # Compact plate lines for the fixed-height list rows. Each line ends in a
+    # [<br>] postroll, so it disappears entirely on a non-plate Version.
+    def _plate_list_lines(self):
+        return self._lines([
+            ("{[<b>]sg_plt_plate_description[</b>  ]}",
+             ("sg_plt_plate_description",)),
+            ("{[Lineup ]sg_plt_lineup_frame_start}{[-]sg_plt_lineup_frame_end[<br>]}",
+             ("sg_plt_lineup_frame_start", "sg_plt_lineup_frame_end")),
+            ("{[Action ]sg_plt_lineup_ffoa}{[-]sg_plt_lineup_lfoa}",
+             ("sg_plt_lineup_ffoa", "sg_plt_lineup_lfoa")),
+            ("{[  H ]sg_plt_handle_head}{[/]sg_plt_handle_tail[<br>]}",
+             ("sg_plt_handle_head", "sg_plt_handle_tail")),
+        ])
+
+    def get_list_item_definition(self, entity_type):
+        values = super(BufShotgunFields, self).get_list_item_definition(entity_type)
+        if entity_type == "Version":
+            # Stock body, but with Comments in pre-roll form so an empty
+            # description no longer costs a (cut-off) fourth line.
+            values["body"] = (self._plate_list_lines()
+                              + "<b>By:</b> {user|created_by}"
+                              "{[<br><b>Comments:</b> ]description}")
+        return values
+
+    def get_entity_tabs_definition(self, entity_type, shotgun_globals):
+        values = super(BufShotgunFields, self).get_entity_tabs_definition(
+            entity_type, shotgun_globals)
+        if entity_type == "Task" and "versions" in values:
+            # buf_shotgun_filters.py adds the shot's plates to this tab.
+            values["versions"]["description"] = (
+                "Review versions for this Task, plus the shot's plates.")
+        return values
+
+    def get_main_view_definition(self, entity_type):
+        values = super(BufShotgunFields, self).get_main_view_definition(entity_type)
+        if entity_type != "Version":
+            return values
+        detail = self._lines([
+            ("{[<br><b>Timewarp: </b>]sg_plt_timewarp_keyframe_position_list}",
+             ("sg_plt_timewarp_keyframe_position_list",)),
+            ("{[<br><b>Camera: </b>]sg_plt_camera_format}",
+             ("sg_plt_camera_format",)),
+            ("{[<br><b>Camera roll: </b>]sg_plt_camroll}{[  <b>Tape: </b>]sg_plt_tape}",
+             ("sg_plt_camroll", "sg_plt_tape")),
+            ("{[<br><b>TC: </b>]sg_plt_start_timecode}{[ - ]sg_plt_end_timecode}",
+             ("sg_plt_start_timecode", "sg_plt_end_timecode")),
+            ("{[  <b>Source TC: </b>]sg_plt_source_start_timecode}"
+             "{[ - ]sg_plt_source_end_timecode}",
+             ("sg_plt_source_start_timecode", "sg_plt_source_end_timecode")),
+            ("{[<br><b>Slate: </b>]sg_plt_on_set_take_text}",
+             ("sg_plt_on_set_take_text",)),
+            ("{[<br><b>Plate comments: </b>]sg_plt_comments}",
+             ("sg_plt_comments",)),
+            ("{[<br><b>Instructions: </b>]sg_plt_effect_instructions}",
+             ("sg_plt_effect_instructions",)),
+        ])
+        summary = self._plate_summary()
+        if summary or detail:
+            values["body"] = values.get("body", "") + "<br>" + summary + detail
+        return values
+
+    def get_all_fields(self, entity_type):
+        values = list(super(BufShotgunFields, self).get_all_fields(entity_type))
+        if entity_type == "Version":
+            have = self._version_fields() or ()
+            values += sorted(f for f in have if f.startswith("sg_plt_")
+                             and f not in values)
+        return values

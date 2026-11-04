@@ -48,7 +48,8 @@ class EngineInit(HookBaseClass):
         self._register_commands(engine)
         if getattr(engine, "name", None) != "tk-nuke":
             return
-        for module_name in ("write_node_rebuild", "buffalo_menu"):
+        # STUDIO_PLATE_LINEUP_2026_11_02: plate_lineup registers before buffalo_menu files it.
+        for module_name in ("write_node_rebuild", "plate_lineup", "buffalo_menu"):
             try:
                 module = self._load_config_module(module_name)
                 if module_name == "buffalo_menu":

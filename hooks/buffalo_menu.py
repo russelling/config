@@ -83,6 +83,7 @@ _LAYOUT = (
     "Trace Dailies Match (this shot)",
     None,
     "Load Shot Plates",
+    "Plate Lineup (Flow)",   # STUDIO_PLATE_LINEUP_2026_11_02
     "Rebuild Write Node",
     None,
     "QT Frame Preview",

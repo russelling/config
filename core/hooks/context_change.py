@@ -44,6 +44,8 @@ _COMMAND_MODULES = (
     ("dailies_viewer.py", "dailies_viewer"),
     # STUDIO_BUFFALO_MENU_2026_09_29 -- keep in step with engine_init.py.
     ("write_node_rebuild.py", "write_node_rebuild"),
+    # STUDIO_PLATE_LINEUP_2026_11_02 -- keep in step with engine_init.py.
+    ("plate_lineup.py", "plate_lineup"),
 )
 
 

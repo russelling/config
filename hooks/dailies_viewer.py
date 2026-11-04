@@ -106,16 +106,21 @@ the rest of the pipeline move off "-latest" to match Nuke's pin, or does
 Nuke's pin get reconsidered) -- not something this tool should paper over by
 guessing a name.
 
-CAMERA FIELD -- NOT YET WIRED
-------------------------------
-resolve_show_lut() picks a per-camera show LUT keyed on a "camera" string,
-which the QT bake reads from the flag JSON. Nuke has no flag JSON, and the
-ShotGrid field that would carry a Shot's camera has not been confirmed yet
-(open item from claude/per-camera-show-lut-design.md). Rather than guess a
-field name and query ShotGrid for it, every command in this file prompts
-once for an optional camera override (blank = the bake's own ARRI default).
-Wire up the real field lookup once it's confirmed and this prompt can go
-away.
+CAMERA -- FROM THE BG01 PLATE ON FLOW (STUDIO_DV_CAMERA_FROM_PLATE_2026_11_02)
+--------------------------------------------------------------------
+resolve_show_lut() and resolve_log_space() pick the show LUT and the log
+space from a "camera" string, which the QT bake reads from the flag JSON.
+Here it comes from Flow: the shot's BG01 plate record, field
+sg_plt_camera_format (hooks/plate_sg.py finds the plate entity and the
+BG01 record -- same bg01 rule as the New File frame range). The format is
+mapped onto the bake's OWN alias tables (CAMERA_LOG_SPACES): an exact alias,
+else an alias named as a whole word ("ARRI ALEXA 35 ..." -> arri). Empty,
+unrecognised or ambiguous -> the bake's ARRI default, and the reason is
+shown. The typed camera prompt is gone.
+
+NOTE: nothing writes "camera" into a render flag yet, so QTs still bake
+with the ARRI default. On a non-ARRI shot this viewer is now per-camera
+while the dailies QT is not -- that is the QT side's gap, not this one's.
 
 THINGS TO VERIFY ON THE REAL NUKE (cannot be checked from here)
 ------------------------------------------------------------------
@@ -351,6 +356,34 @@ def _load_plate_reads():
     return module
 
 
+def _load_plate_sg():
+    """Import plate_sg.py (same folder) by explicit path. STUDIO_DV_CAMERA_FROM_PLATE_2026_11_02"""
+    if "plate_sg" in _CACHE:
+        return _CACHE["plate_sg"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "plate_sg.py")
+    spec = importlib.util.spec_from_file_location("_buf_dailies_plate_sg", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_buf_dailies_plate_sg"] = module
+    spec.loader.exec_module(module)
+    _CACHE["plate_sg"] = module
+    return module
+
+
+def _camera_from_flow(tk, context, m):
+    """The bake camera alias from the BG01 plate's sg_plt_camera_format.
+    Never raises: anything wrong is a reason line and an empty camera."""
+    try:
+        ps = _load_plate_sg()
+    except Exception as exc:
+        return {"camera": "", "format": None, "plate": None,
+                "reasons": ["Camera: hooks/plate_sg.py did not load (%s) -- "
+                            "using the bake default (ARRI)." % exc]}
+    families = list(getattr(m, "CAMERA_LOG_SPACES", None)
+                    or getattr(m, "SHOW_LUTS_BY_CAMERA", {}))
+    return ps.bg01_camera(tk.shotgun, context.entity, families)
+
+
 def _extract_cc_id(cc_path):
     """Read back the `id` attribute cdl_as_cc() wrote onto the correction it
     chose. Used only to learn which correction the bake's own selection rule
@@ -499,7 +532,21 @@ def resolve_dailies_chain(tk, context, camera_override=None):
             m.shot_plates_dir = original_spd
     result["lut_path"] = lut_path
 
-    camera = (camera_override or "").strip().lower()
+    # STUDIO_DV_CAMERA_FROM_PLATE_2026_11_02: camera from Flow unless the caller forces one.
+    if camera_override is None:
+        cam = _camera_from_flow(tk, context, m)
+        camera = cam["camera"]
+        result["camera_source"] = "Flow BG01 plate"
+        result["camera_format"] = cam["format"]
+        result["camera_plate"] = cam["plate"]
+        result["camera_note"] = cam["reasons"]
+        if not camera:
+            result["reasons"].extend(cam["reasons"])
+    else:
+        camera = (camera_override or "").strip().lower()
+        result["camera_source"] = "override"
+        result["camera_note"] = ["Camera: %r (override)" % camera]
+    result["camera"] = camera
     if not lut_path:
         show_data = {"camera": camera} if camera else {}
         show_lut_mac, why = m.resolve_show_lut(show_data)
@@ -1013,6 +1060,13 @@ def trace_dailies_match(camera_override=None):
 
     chain = resolve_dailies_chain(tk, context, camera_override=camera_override)
 
+    _section("1b. Camera (%s)" % chain.get("camera_source"))
+    print("  BG01 plate    : %s" % chain.get("camera_plate"))
+    print("  camera format : %s" % chain.get("camera_format"))
+    print("  camera        : %s" % (chain.get("camera") or "(none -- bake default, ARRI)"))
+    for line in chain.get("camera_note") or []:
+        print("  %s" % line)
+
     _section("2. Plates / CDL")
     print("  plates folder : %s" % chain["plates_dir"])
     if chain["cdl_raw_path"]:
@@ -1077,14 +1131,6 @@ def trace_dailies_match(camera_override=None):
 # Menu commands
 # ---------------------------------------------------------------------------
 
-def _ask_camera():
-    import nuke
-    return nuke.getInput(
-        "Camera override (blank = bake default / ARRI).\n"
-        "The ShotGrid camera field for per-camera show LUTs isn't wired up "
-        "yet -- type arri / red / sony / dji to test one of those LUTs.", "")
-
-
 def _reload_self():
     """Re-exec THIS file fresh from disk and return the resulting module.
 
@@ -1114,7 +1160,7 @@ def _reload_self():
 
 
 def _run_trace():
-    trace_dailies_match(camera_override=_ask_camera())
+    trace_dailies_match()
 
 
 def _run_rebuild():
@@ -1135,8 +1181,7 @@ def _run_rebuild():
         nuke.message(state)
         return
 
-    camera = _ask_camera()
-    chain = resolve_dailies_chain(engine.sgtk, context, camera_override=camera)
+    chain = resolve_dailies_chain(engine.sgtk, context)
     try:
         grp = build_dailies_viewer_group(chain)
     except DailiesViewerError as exc:
@@ -1144,7 +1189,9 @@ def _run_rebuild():
         return
     nuke.message(
         "Built/updated %s.\n\n%s"
-        % (grp.name(), "\n".join(chain["reasons"]) or "Matched cleanly."))
+        % (grp.name(), "\n".join(
+            (chain.get("camera_note") if chain.get("camera") else [])
+            + chain["reasons"]) or "Matched cleanly."))
 
 
 def _run_enable():

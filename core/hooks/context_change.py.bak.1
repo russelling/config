@@ -1,0 +1,141 @@
+# Copyright (c) Studio. All Rights Reserved.
+"""
+context_change.py
+
+Toolkit core hook, run before and after every context change.
+
+WHY THIS EXISTS
+---------------
+core/hooks/engine_init.py registers two config-level Nuke commands that are
+not apps: "Load Shot Plates" (hooks/plate_reads.py) and the Dailies Viewer
+commands (hooks/dailies_viewer.py). engine_init runs ONCE, when the engine
+starts. That is not enough, because (verified in tk-core v0.23.8
+platform/engine.py and tk-nuke v0.16.3 engine.py):
+
+  1. Nuke launched from Desktop starts in the PROJECT context; opening a shot
+     script through Workfiles2 then calls engine.change_context().
+  2. change_context() -> __load_apps() does `self.__commands = dict()` and only
+     repopulates commands that belong to APPS. Commands registered from a core
+     hook have no app, so they are silently dropped.
+  3. engine_init is NOT re-run after a context change.
+  4. tk-nuke's post_context_change() rebuilds the menu from the now-shorter
+     command list -- and it does so BEFORE this core hook's
+     post_context_change fires.
+
+So both commands vanished from the menu the moment a shot was opened, even
+though the log said they were registered. This hook puts them back and
+rebuilds the menu once more.
+
+Anything that fails here is logged and swallowed, like engine_init: a missing
+menu command is an inconvenience, a context switch that raises is not.
+"""
+
+import importlib.util
+import os
+import sys
+
+from tank import get_hook_baseclass
+
+HookBaseClass = get_hook_baseclass()
+
+# (module file in hooks/, module name) -- same pair engine_init.py loads.
+_COMMAND_MODULES = (
+    ("plate_reads.py", "plate_reads"),
+    ("dailies_viewer.py", "dailies_viewer"),
+    # STUDIO_BUFFALO_MENU_2026_09_29 -- keep in step with engine_init.py.
+    ("write_node_rebuild.py", "write_node_rebuild"),
+)
+
+
+class ContextChange(HookBaseClass):
+
+    def pre_context_change(self, current_context, next_context):
+        pass
+
+    def post_context_change(self, previous_context, current_context):
+        # previous_context is None on engine START-UP; engine_init handles that.
+        if previous_context is None:
+            return
+        try:
+            import sgtk
+            engine = sgtk.platform.current_engine()
+        except Exception:
+            return
+        if engine is None or getattr(engine, "name", None) != "tk-nuke":
+            return
+
+        # STUDIO_SHOT_WORKDIR_2026_09_26: cwd + file-browser favourites follow
+        # the shot on every context change (hooks/shot_workdir.py). The
+        # project_directory knob is left to the scene_operation hook so a
+        # context change never marks a script modified.
+        self._apply_shot_workdir(engine, current_context)
+
+        config_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+
+        registered_any = False
+        for filename, module_name in _COMMAND_MODULES:
+            try:
+                path = os.path.join(config_root, "hooks", filename)
+                if not os.path.exists(path):
+                    self._log(engine, "warning",
+                              "context_change: %s not found at %s" % (filename, path))
+                    continue
+                before = set(engine.commands)
+                spec = importlib.util.spec_from_file_location(module_name, path)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                module.register(engine)
+                added = set(engine.commands) - before
+                registered_any = registered_any or bool(added)
+                self._log(engine, "info",
+                          "context_change: re-registered %s after context "
+                          "change: %s" % (module_name, sorted(added) or "(none new)"))
+            except Exception as exc:
+                self._log(engine, "error",
+                          "context_change: failed to re-register %s: %s"
+                          % (module_name, exc))
+
+        # tk-nuke already rebuilt its menu before this hook ran, without these
+        # commands. STUDIO_BUFFALO_MENU_2026_09_29: hooks/buffalo_menu.py now
+        # files them (and the config/nuke tools) under Flow Production
+        # Tracking > Buffalo VFX and rebuilds the menu once, under the same
+        # conditions tk-nuke itself checks.
+        try:
+            path = os.path.join(config_root, "hooks", "buffalo_menu.py")
+            spec = importlib.util.spec_from_file_location("buffalo_menu", path)
+            buffalo_menu = importlib.util.module_from_spec(spec)
+            sys.modules["buffalo_menu"] = buffalo_menu
+            spec.loader.exec_module(buffalo_menu)
+            buffalo_menu.organise(engine)
+        except Exception as exc:
+            self._log(engine, "error",
+                      "context_change: buffalo_menu failed: %s" % exc)
+
+    def _apply_shot_workdir(self, engine, context):
+        try:
+            config_root = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
+            path = os.path.join(config_root, "hooks", "shot_workdir.py")
+            if not os.path.exists(path):
+                self._log(engine, "warning",
+                          "context_change: shot_workdir.py not found at %s" % path)
+                return
+            spec = importlib.util.spec_from_file_location("shot_workdir", path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["shot_workdir"] = module
+            spec.loader.exec_module(module)
+            result = module.apply(engine.sgtk, context, set_script_knob=False)
+            self._log(engine, "info",
+                      "context_change: shot working dir -> %s" % result)
+        except Exception as exc:
+            self._log(engine, "error",
+                      "context_change: shot_workdir failed: %s" % exc)
+
+    @staticmethod
+    def _log(engine, level, message):
+        try:
+            getattr(engine.logger, level)(message)
+        except Exception:
+            pass

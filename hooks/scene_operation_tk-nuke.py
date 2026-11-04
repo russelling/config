@@ -192,6 +192,34 @@ CUT_NOTE_NAME = "CutInfo"
 DASGRAIN_FILE_NAME = "DasGrain.nk"
 DASGRAIN_GROUP_PREFIX = "DasGrain"
 
+# STUDIO_NEWFILE_LAYOUT_2026_11_03
+# New-script layout, copied from the graph Mark laid out by hand
+# (302_038_0040, 2026-11-03). (x, y) offsets from the primary plate Read;
+# Dots are offset +34 in x so they sit centred under an 80px-wide node.
+# Move things here, not in _build_color_template.
+NEWFILE_LAYOUT = {
+    "branch":        (34, 213),    # Dot off the Read: comp line + degrain line
+    "working":       (34, 286),    # "ACEScg working"
+    "dasgrain":      (0, 922),
+    "to_write":      (34, 1080),   # "to Write"
+    "write":         (0, 1210),
+    "viewer":        (0, 1340),
+    # regrain box, right of the main line
+    "backdrop":      (390, 96),
+    "mask_top":      (432, 422),   # "Mask" (unconnected)
+    "mask_in":       (432, 888),
+    "degrain_top":   (507, 213),   # "DeGrained PLATE" (from the branch Dot)
+    "degrain_in":    (507, 914),
+    "plate_top":     (563, 172),   # "Plate" (from the Read)
+    "plate_in":      (563, 954),
+    "degrain_note":  (522, 416),
+    # QC, off the render path
+    "qc_tap":        (641, 291),   # "plate (QC)"
+    "qc_diff":       (607, 1059),
+}
+NEWFILE_BACKDROP_SIZE = (310, 968)
+NEWFILE_BACKDROP_LABEL = "REGRAIN - DasGrain (dis)\nDiff Matte"
+
 # Matches an EXR frame like "301_001_010_takeA.1001.exr" or
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
 # Anything under plates/ that doesn't match this is treated as a single,
@@ -792,10 +820,21 @@ class SceneOperation(HookClass):
             self._regrain_note = "NOT ADDED - no DasGrain group in %s" % path
         return dasgrain
 
-    def _build_regrain(self, read_plates, comp_in, x_main, y, y_step):
-        """DasGrain on the main line at (x_main, y), disabled, with its PLATE
-        input piped from the plate Read through a backdrop box offset to the
-        right. Returns the node the "to Write" Dot should take - DasGrain, or
+    def _place(self, node, key, origin):
+        """Put node at NEWFILE_LAYOUT[key] relative to origin (x, y). STUDIO_NEWFILE_LAYOUT_2026_11_03"""
+        dx, dy = NEWFILE_LAYOUT[key]
+        node.setXYpos(origin[0] + dx, origin[1] + dy)
+        return node
+
+    def _build_regrain(self, read_plates, comp_in, branch, origin):
+        """DasGrain on the main line, disabled, with its inputs piped in from
+        the regrain backdrop to the right (NEWFILE_LAYOUT):
+            0 COMP             <- comp_in ("ACEScg working")
+            1 PLATE            <- "Plate" Dot <- the plate Read
+            2 DEGRAINED_PLATE  <- "DeGrained PLATE" Dot <- branch Dot
+                                  (put the degrain on this line)
+            3 mask             <- "Mask" Dot, unconnected
+        Returns the node the "to Write" Dot should take - DasGrain, or
         comp_in if it could not be added. Never raises."""
         self._regrain_note = "not added"
         try:
@@ -809,35 +848,42 @@ class SceneOperation(HookClass):
                 "DISABLED until set up:\n"
                 "1. connect degrained plate (input 2)\n"
                 "2. Analyze   3. enable")
-            dasgrain.setXYpos(x_main, y)
+            self._place(dasgrain, "dasgrain", origin)
 
-            x_box = x_main + 450
-            y_top = read_plates.ypos()
-            plate_tap = nuke.nodes.Dot(label="plate -> DasGrain PLATE")
-            plate_tap.setInput(0, read_plates)
-            plate_tap.setXYpos(x_box + 34, y_top + 40)
-            plate_in = nuke.nodes.Dot()
-            plate_in.setInput(0, plate_tap)
-            plate_in.setXYpos(x_box + 34, y + 4)
-            dasgrain.setInput(1, plate_in)
+            def _pipe(label, source, top_key, in_key, input_index):
+                top = nuke.nodes.Dot()
+                if label:
+                    top["label"].setValue(label)
+                if source is not None:
+                    top.setInput(0, source)
+                self._place(top, top_key, origin)
+                bottom = nuke.nodes.Dot()
+                bottom.setInput(0, top)
+                self._place(bottom, in_key, origin)
+                dasgrain.setInput(input_index, bottom)
+
+            _pipe("Plate", read_plates, "plate_top", "plate_in", 1)
+            _pipe("DeGrained PLATE", branch, "degrain_top", "degrain_in", 2)
+            _pipe("Mask", None, "mask_top", "mask_in", 3)
 
             note = nuke.nodes.StickyNote(
                 label="DEGRAINED PLATE\nput it here and connect to\n"
                       "DasGrain input 2 (DEGRAINED_PLATE)")
-            note.setXYpos(x_box + 120, y - y_step)
+            self._place(note, "degrain_note", origin)
 
             backdrop = nuke.nodes.BackdropNode(
-                label="REGRAIN - DasGrain (disabled)",
+                label=NEWFILE_BACKDROP_LABEL,
                 note_font_size=24,
                 tile_color=0x3D4A5AFF,
-                bdwidth=480,
-                bdheight=(y - y_top) + 160,
+                bdwidth=NEWFILE_BACKDROP_SIZE[0],
+                bdheight=NEWFILE_BACKDROP_SIZE[1],
             )
-            backdrop.setXYpos(x_box - 60, y_top - 60)
+            self._place(backdrop, "backdrop", origin)
 
             self._regrain_note = (
-                "%s added DISABLED - PLATE wired; connect the degrained plate "
-                "(input 2), Analyze, then enable" % dasgrain.name())
+                "%s added DISABLED - PLATE and DEGRAINED PLATE lines wired "
+                "from the plate; put the degrain on the DeGrained PLATE line, "
+                "Analyze, then enable" % dasgrain.name())
             self._debug_log("regrain: %s" % self._regrain_note)
             return dasgrain
         except Exception as exc:
@@ -845,18 +891,18 @@ class SceneOperation(HookClass):
             self._debug_log("regrain failed: %r" % exc)
             return comp_in
 
-    def _build_difference_qc(self, plate_src, comp_src, x):
+    def _build_difference_qc(self, plate_src, comp_src, origin):
         """Difference of comp vs plate, off the render path. Never raises."""
         self._qc_note = "not added"
         try:
             tap = nuke.nodes.Dot(label="plate (QC)")
             tap.setInput(0, plate_src)
-            tap.setXYpos(x + 34, plate_src.ypos())
+            self._place(tap, "qc_tap", origin)
             diff = nuke.nodes.Difference(
                 label="QC: comp vs plate\n(not rendered)")
             diff.setInput(0, comp_src)
             diff.setInput(1, tap)
-            diff.setXYpos(x, comp_src.ypos())
+            self._place(diff, "qc_diff", origin)
             self._qc_note = "%s: comp vs plate (alpha), not in the render path" % diff.name()
         except Exception as exc:
             self._qc_note = "NOT ADDED - error: %s" % exc
@@ -991,26 +1037,32 @@ class SceneOperation(HookClass):
             )
             read_plates.setXYpos(x_main, y)
 
+        # STUDIO_NEWFILE_LAYOUT_2026_11_03: every position below comes from NEWFILE_LAYOUT,
+        # relative to the primary Read.
+        origin = (read_plates.xpos(), read_plates.ypos())
+
+        # ── Dot: branch (comp line + DeGrained PLATE line) ────────────────
+        dot_branch = nuke.createNode("Dot", inpanel=False)
+        dot_branch.setInput(0, read_plates)
+        self._place(dot_branch, "branch", origin)
+
         # ── Dot: ACEScg working ───────────────────────────────────────────
-        y += y_step
         dot_working = nuke.createNode("Dot", inpanel=False)
-        dot_working.setInput(0, read_plates)
+        dot_working.setInput(0, dot_branch)
         dot_working["label"].setValue("ACEScg working")
-        dot_working.setXYpos(x_main + 34, y)
+        self._place(dot_working, "working", origin)
 
         # STUDIO_NO_VFX_PULL_READ_2026_10_28: no VFX PULL placeholder Read / Merge any more.
 
         # ── Regrain: DasGrain after the comp area (STUDIO_NEWFILE_REGRAIN_QC_2026_10_28) ──
         # Two steps of empty space below "ACEScg working" for the comp.
-        y += y_step * 2
-        comp_out = self._build_regrain(read_plates, dot_working, x_main, y, y_step)
+        comp_out = self._build_regrain(read_plates, dot_working, dot_branch, origin)
 
         # ── Dot: to Write ─────────────────────────────────────────────────
-        y += y_step
         dot_write = nuke.createNode("Dot", inpanel=False)
         dot_write.setInput(0, comp_out)
         dot_write["label"].setValue("to Write")
-        dot_write.setXYpos(x_main + 34, y)
+        self._place(dot_write, "to_write", origin)
 
         # ── Write: TK Write Node (Step-based EXR preset) ────────────
         # We use tk-nuke-writenode's WriteTank gizmo so the file path is
@@ -1021,7 +1073,6 @@ class SceneOperation(HookClass):
         # STUDIO_STEP_WRITE_DEFAULTS_APPLIED_2026_09_16: preset now depends on the Step
         # (temp -> 16-bit DWAA, comp -> 32-bit) -- see WRITE_PRESET_BY_STEP
         # near the top of this file.
-        y += y_step
         write_preset = self._write_preset_for_step(context, fields)
         try:
             wn_app = self._get_write_node_app(engine)
@@ -1044,7 +1095,7 @@ class SceneOperation(HookClass):
             write["label"].setValue(
                 "EXR OUTPUT\n(ACEScg linear — no bake)\n[%s]" % write_preset
             )
-            write.setXYpos(x_main, y)
+            self._place(write, "write", origin)
         except Exception as _wn_exc:
             # Fallback: if tk-nuke-writenode isn't loaded for some reason,
             # fall back to a plain Write node so the script still works.
@@ -1082,16 +1133,15 @@ class SceneOperation(HookClass):
             write["label"].setValue(
                 "EXR OUTPUT (FALLBACK)\n(ACEScg linear — no bake)\n[%s]" % write_preset
             )
-            write.setXYpos(x_main, y)
+            self._place(write, "write", origin)
 
         # ── Viewer ────────────────────────────────────────────────────────
-        y += y_step
         viewer = nuke.createNode("Viewer", inpanel=False)
         viewer.setInput(0, dot_write)
         viewer["label"].setValue("Display via OCIO viewer LUT")
-        viewer.setXYpos(x_main, y)
+        self._place(viewer, "viewer", origin)
         self._apply_cut_marks(near=write)  # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
-        self._build_difference_qc(dot_working, dot_write, x_main - 300)  # STUDIO_NEWFILE_REGRAIN_QC_2026_10_28
+        self._build_difference_qc(dot_working, dot_write, origin)  # STUDIO_NEWFILE_LAYOUT_2026_11_03
 
         plate_summary = (
             "\n".join(
