@@ -6,6 +6,8 @@ STUDIO_PLATE_LINEUP_2026_11_02
 STUDIO_PLATE_LINEUP_FFOA_2026_11_03
 STUDIO_PLATE_LINEUP_PANE_2026_11_03
 STUDIO_PLATE_LINEUP_SWITCH_2026_11_03
+STUDIO_PLATE_LINEUP_PRIMARY_RANGE_2026_11_16
+STUDIO_PLATE_LINEUP_BG_FG_EL_2026_11_16
 
 For every plate of a shot (BG, EL, FG ...), pulls the lineup data off
 Flow Production Tracking and (on request) builds the nodes that line each
@@ -31,7 +33,9 @@ WHAT IT DOES
    Select Read / Copy Report buttons; follows context changes by itself.
    The full text report is also printed to the Script Editor. If the pane
    cannot be made, the old pop-up is used.
-2. Build Lineup Nodes (button): for each BG plate found on disk, under the
+2. Build Lineup Nodes (button): for each BG, FG and EL plate found on
+   disk (LINEUP_KINDS; RF, BC, REF ... are reported but never lined up --
+   STUDIO_PLATE_LINEUP_BG_FG_EL_2026_11_16), under the
    plate's Read (an existing Read of that sequence is reused; otherwise one
    is made by plate_reads.make_read, exactly as Load Shot Plates would):
 
@@ -71,8 +75,11 @@ HOW THE NUMBERS ARE READ -- CONFIRMED 2026-11-03 (302_038_0040)
     plate whose placement differs from lineup start is called out.
   * The result is cross-checked against lineup end and against the source
     TCs' action length (LFOA - FFOA + 1); disagreements are reported.
-  * Shot range: Shot sg_cut_in/out (handles included). When those are
-    empty it is DERIVED from the plates -- earliest FFOA - head handle to
+  * Shot range (STUDIO_PLATE_LINEUP_PRIMARY_RANGE_2026_11_16): the
+    PRIMARY plate's lineup start/end (BG, then FG, then EL; lowest
+    number; latest version -- plate_sg.primary_plate_range), the same
+    range a new Nuke script gets. Then Shot sg_cut_in/out (handles
+    included). When those are empty too it is DERIVED from the plates -- earliest FFOA - head handle to
     latest LFOA + tail handle -- checked against
     sg_plt_master_duration_frame_count, and labelled as derived.
   * Timewarp positions are SHOT frames, values are PLATE frames: Nuke's
@@ -99,6 +106,10 @@ MENU_LABEL = "Plate Lineup (Flow)"
 # Lineup Switch: element kinds (the letters of BG01 / EL02 / FG01, lower
 # case) that take part. Empty tuple = every plate that is not BG/FG.
 SWITCH_KINDS = ("el",)
+
+# Element kinds Build Lineup Nodes lines up (Mark, 2026-11-16). Any other
+# prefix (rf, bc, ref ...) is reported only. STUDIO_PLATE_LINEUP_BG_FG_EL_2026_11_16
+LINEUP_KINDS = ("bg", "fg", "el")
 SWITCH_TAG = "__switch__"
 
 # "shot" (confirmed 2026-11-03) | "auto" | "plate" -- see
@@ -475,8 +486,16 @@ def gather(engine):
         data = ps.fetch_shot_plates(sg, shot)
     except ps.PlateSGError as exc:
         raise RuntimeError(str(exc))
-    shot_rng = ps.shot_range(sg, shot["id"])
-    range_how, range_notes = "sg_cut_in/out, handles incl.", []
+    # STUDIO_PLATE_LINEUP_PRIMARY_RANGE_2026_11_16
+    pf, pl, primary_how = ps.primary_plate_range(data["plates"],
+                                                 data["fields"])
+    if pf is not None:
+        shot_rng = (pf, pl)
+        range_how, range_notes = "from %s" % primary_how, []
+    else:
+        shot_rng = ps.shot_range(sg, shot["id"])
+        range_how = "sg_cut_in/out, handles incl."
+        range_notes = ["Primary plate lineup not used: %s" % primary_how]
     if shot_rng[0] is None:
         first, last, range_how, range_notes = derive_shot_range(
             ps, data["plates"], data["fields"])
@@ -497,10 +516,31 @@ def gather(engine):
         plan = plan_plate(ps, plate, data["fields"], shot_rng, disk)
         items.append({"plate": plate, "record": record,
                       "match_note": match_note, "plan": plan,
-                      "bg": ps.bg_number(plate) is not None})
+                      "bg": ps.bg_number(plate) is not None,
+                      "lineup": _lineup_kind(ps, plate) in LINEUP_KINDS})
     return {"ps": ps, "pr": pr, "shot": shot, "shot_range": shot_rng,
             "shot_range_how": range_how, "shot_range_notes": range_notes,
             "plates_dir": plates_dir, "data": data, "items": items}
+
+
+def _lineup_kind(ps, plate):
+    """'bg' / 'el' / 'rf' ... for a plate's code, or None."""
+    key = ps.element_key(ps.plate_code(plate))
+    return key[0] if key else None
+
+
+def _left_out(g):
+    """Codes of the plates Build does not line up (shot prefix stripped)."""
+    shot = g["shot"].get("name") or ""
+    out = []
+    for item in g["items"]:
+        if item.get("lineup"):
+            continue
+        code = g["ps"].plate_code(item["plate"])
+        if shot and code.startswith(shot + "_"):
+            code = code[len(shot) + 1:]
+        out.append(code)
+    return out
 
 
 def match_record(ps, plate, records):
@@ -544,8 +584,10 @@ def report_header(g):
     if data["missing"]:
         lines.append("NOT ON FLOW  : %s" % ", ".join(data["missing"]))
     lines.append("Plates       : %d on Flow, %d BG" % (len(g["items"]), len(bgs)))
-    if not bgs:
-        lines.append("NOTE: no BG plates on Flow -- Build lines up every plate.")
+    left = _left_out(g)
+    if left:
+        lines.append("Not lined up : %s (only %s are)" % (
+            ", ".join(left), "/".join(k.upper() for k in LINEUP_KINDS)))
     sw = plan_switch(g)
     if len(sw["steps"]) >= 2:
         lines.append("Switch       : %s  (%s plates, stepped at each FFOA)"
@@ -569,7 +611,8 @@ def item_lines(g, item):
     shown = set(f for f in data["fields"].values() if f)
     lines = []
     plate, plan = item["plate"], item["plan"]
-    head = "%s%s" % (ps.plate_code(plate), "" if item["bg"] else "   (not BG)")
+    head = "%s%s" % (ps.plate_code(plate),
+                      "" if item.get("lineup") else "   (not lined up)")
     lines.append(head)
     lines.append("-" * len(head))
     for logical, given in ps.LINEUP_FIELDS.items():
@@ -680,16 +723,17 @@ def _remove_previous(code):
     return removed
 
 
-def build_nodes(g, bg_only=None):
+def build_nodes(g, bg_only=False):
     """Build the lineup nodes. Returns a list of result lines.
-    bg_only=None: BG plates only if the shot has any, else every plate."""
+    Every LINEUP_KINDS plate (BG, FG, EL); bg_only=True: BG plates only.
+    STUDIO_PLATE_LINEUP_BG_FG_EL_2026_11_16"""
     import nuke
     ps, pr = g["ps"], g["pr"]
-    if bg_only is None:
-        bg_only = any(item["bg"] for item in g["items"])
     results = []
     g["_tails"] = {}
     for item in g["items"]:
+        if not item.get("lineup"):
+            continue
         if bg_only and not item["bg"]:
             continue
         code, plan, record = ps.plate_code(item["plate"]), item["plan"], item["record"]
@@ -751,6 +795,10 @@ def build_nodes(g, bg_only=None):
         if failures:
             line += "\n    COULD NOT SET: %s" % "; ".join(failures)
         results.append(line)
+    left = _left_out(g)
+    if left:
+        results.append("Not lined up (not %s): %s" % (
+            "/".join(k.upper() for k in LINEUP_KINDS), ", ".join(left)))
     return results or ["No %splates to build." % ("BG " if bg_only else "")]
 
 
@@ -918,7 +966,9 @@ def pane_row(g, item):
             (dt is not None and ht is not None and dt != ht):
         handles += "  (Flow %s/%s)" % (_num(hh), _num(ht))
     disk = "%d-%d" % (rec["first"], rec["last"]) if rec else "NOT ON DISK"
-    if plan["kind"] == "timewarp":
+    if not item.get("lineup"):
+        build = "not lined up"
+    elif plan["kind"] == "timewarp":
         build = "TimeWarp %d keys" % len(plan["tw_keys"])
     elif plan["kind"] == "offset":
         build = "offset %+d" % plan["offset"]
@@ -933,6 +983,8 @@ def pane_row(g, item):
             short.append(w.split(" -- ")[0].rstrip("."))
     severity = "bad" if (plan["kind"] is None or rec is None or plan["problems"]) \
         else ("warn" if warnings else "ok")
+    if not item.get("lineup"):
+        severity = "ok"           # RF / BC / REF: reported, never built
     code = ps.plate_code(plate)
     prefix = "%s_" % (g["shot"].get("name") or "")
     if prefix != "_" and code.startswith(prefix):
@@ -1044,8 +1096,10 @@ def _pane_class():
                 "%d-%d" % (sf, sl) if sf is not None else "-",
                 g["shot_range_how"])
             extra = list(g["shot_range_notes"])
-            if not any(i["bg"] for i in g["items"]):
-                extra.append("No BG plates -- Build lines up every plate.")
+            left = _left_out(g)
+            if left:
+                extra.append("Not lined up (not %s): %s" % (
+                    "/".join(k.upper() for k in LINEUP_KINDS), ", ".join(left)))
             sw = plan_switch(g)
             if len(sw["steps"]) >= 2:
                 warns = ["%s: %s" % (st["code"], w)

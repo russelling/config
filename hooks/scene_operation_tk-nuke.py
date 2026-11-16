@@ -176,6 +176,19 @@ SG_FRAME_OUT_FIELD = "sg_cut_out"
 # longer word or number: matches bg01, BG01, BG1, bg001; not bg010, bg11.
 FRAME_RANGE_PLATE_RE = re.compile(r"(?<![a-z0-9])bg0*1(?![0-9])", re.IGNORECASE)
 
+# STUDIO_NEWFILE_RANGE_FROM_PLATE_2026_11_16 (Mark, 2026-11-16)
+# Ahead of the cut in/out above: the PRIMARY plate's Flow lineup
+# (sg_plt_lineup_frame_start / _end) is the shot length. Primary = BG,
+# then FG, then EL; lowest number; latest version. The rule lives in
+# hooks/plate_sg.py (PRIMARY_KINDS, primary_plate_range) so Plate Lineup
+# uses the same range.
+#
+# STUDIO_NEWFILE_AUTO_LINEUP_2026_11_16
+# A first-version New File for a shot with at least this many distinct
+# plate elements on Flow (latest version of each counted once) runs
+# Plate Lineup: Build Lineup Nodes, then opens the pane.
+AUTO_LINEUP_MIN_ELEMENTS = 2
+
 # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
 # sg_cut_in/out include the handles (per Mark), so the script range above
 # is the full plate length. The cut = range minus these handle lengths.
@@ -651,22 +664,80 @@ class SceneOperation(HookClass):
                 return (record["first"], record["last"]), record["relpath"]
         return None, None
 
+    # STUDIO_NEWFILE_RANGE_FROM_PLATE_2026_11_16
+    def _load_hook_module(self, name):
+        """hooks/<name>.py, loaded fresh by path under a private module
+        name (same pattern as dailies_viewer / plate_lineup)."""
+        import importlib.util
+        import sys as _sys_mod
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            name + ".py")
+        module_name = "_buf_scene_op_" + name
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        _sys_mod.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _flow_plates(self, context):
+        """(plate_sg module, plate_sg.fetch_shot_plates() dict) for the
+        context's Shot. Read once per New File (the cache is cleared by
+        _safe_apply_frame_range). Raises on failure."""
+        entity = context.entity or {}
+        cached = getattr(self, "_flow_plates_cache", None)
+        if cached and cached[0] == entity.get("id"):
+            return cached[1], cached[2]
+        ps = self._load_hook_module("plate_sg")
+        data = ps.fetch_shot_plates(
+            self.parent.shotgun, {"type": "Shot", "id": entity["id"]})
+        self._flow_plates_cache = (entity.get("id"), ps, data)
+        return ps, data
+
+    def _primary_plate_range(self, context):
+        """((first, last), how) from the primary plate's Flow lineup
+        (plate_sg.primary_plate_range), or (None, reason). Never raises."""
+        entity = context.entity or {}
+        if entity.get("type") != "Shot" or not entity.get("id"):
+            return None, "not a Shot context"
+        try:
+            ps, data = self._flow_plates(context)
+        except Exception as exc:
+            self._debug_log("frame range: Flow plate query failed for %r: %r"
+                            % (entity, exc))
+            return None, "Flow plate query failed (%s)" % exc
+        first, last, how = ps.primary_plate_range(data["plates"], data["fields"])
+        if first is None:
+            return None, how
+        return (first, last), how
+
     def _safe_apply_frame_range(self, context):
-        """Set the root first/last frame on a new script: Flow cut in/out
-        first, then the BG01 plate, else leave Nuke's default. Never raises;
-        records what it did for the build message (_frame_range_summary)."""
+        """Set the root first/last frame on a new script, from the first of
+          1. the primary plate's Flow lineup start/end (BG, then FG, then
+             EL - STUDIO_NEWFILE_RANGE_FROM_PLATE_2026_11_16),
+          2. the Shot's cut in/out on Flow,
+          3. the BG01 plate on disk,
+        else leave Nuke's default. Never raises; records what it did for
+        the build message (_frame_range_summary)."""
         self._frame_range_note = "unchanged (Nuke default)"
         self._cut = None
         self._cut_note = "not marked - script range not set"
+        self._flow_plates_cache = None
         try:
-            frame_range = self._shotgrid_frame_range(context)
-            source = "Flow %s / %s" % (SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD)
+            frame_range, plate_how = self._primary_plate_range(context)
+            source = "Flow %s" % plate_how
+            if frame_range is None:
+                self._debug_log("frame range: primary plate lineup not used - %s"
+                                % plate_how)
+                frame_range = self._shotgrid_frame_range(context)
+                source = "Flow %s / %s - no plate lineup: %s" % (
+                    SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD, plate_how)
             if frame_range is None:
                 frame_range, plate = self._bg01_plate_range(context)
-                source = "BG01 plate %s" % plate
+                source = "BG01 plate %s on disk" % plate
             if frame_range is None:
                 self._frame_range_note = (
-                    "NOT SET - no cut in/out on Flow and no BG01 plate on disk"
+                    "NOT SET - no plate lineup on Flow (%s), no cut in/out "
+                    "on Flow and no BG01 plate on disk" % plate_how
                 )
                 self._debug_log("frame range: %s for %s" % (self._frame_range_note, context))
                 return
@@ -920,6 +991,69 @@ class SceneOperation(HookClass):
     def _frame_range_summary(self):
         return getattr(self, "_frame_range_note", "unchanged (Nuke default)")
 
+    # STUDIO_NEWFILE_AUTO_LINEUP_2026_11_16
+    def _lineup_summary(self):
+        return getattr(self, "_lineup_note", "not run")
+
+    def _auto_plate_lineup(self, context, engine):
+        """Shot with >= AUTO_LINEUP_MIN_ELEMENTS plate elements on Flow
+        (latest version of each counted once): do what the artist would
+        do in Plate Lineup - Build Lineup Nodes now (one undo step, so
+        it is in the script that gets saved), then open the pane once
+        New File has finished. Never raises; the outcome goes in the
+        build message and scene_op_debug.log."""
+        self._lineup_note = "not run"
+        try:
+            entity = context.entity or {}
+            if entity.get("type") != "Shot" or not entity.get("id"):
+                self._lineup_note = "not run - not a Shot context"
+                return
+            engine_entity = (getattr(engine, "context", None) and
+                             engine.context.entity) or {}
+            if engine_entity.get("id") != entity.get("id"):
+                self._lineup_note = ("not run - Nuke is not in this shot's "
+                                     "context yet; open Plate Lineup from "
+                                     "the Buffalo VFX menu")
+                return
+            ps, data = self._flow_plates(context)
+            elements = sorted(ps.latest_by_element(data["plates"]))
+            names = ", ".join(ps.element_label(k) for k in elements) or "none"
+            if len(elements) < AUTO_LINEUP_MIN_ELEMENTS:
+                self._lineup_note = ("not run - %d plate element%s on Flow (%s)"
+                                     % (len(elements),
+                                        "" if len(elements) == 1 else "s",
+                                        names))
+                return
+            pl = self._load_hook_module("plate_lineup")
+            g = pl.gather(engine)
+            result = pl._do_build(g)
+            self._lineup_note = "%d elements (%s) - built, pane opened:\n    %s" % (
+                len(elements), names, "\n    ".join(result))
+            self._open_lineup_pane_later(pl)
+        except Exception as exc:
+            import traceback as _tb
+            self._lineup_note = ("FAILED - %s (open Plate Lineup from the "
+                                 "Buffalo VFX menu)" % exc)
+            self._debug_log("auto lineup failed: %r\n%s" % (exc, _tb.format_exc()))
+        finally:
+            self._debug_log("auto lineup: %s" % self._lineup_note)
+
+    def _open_lineup_pane_later(self, pl):
+        """Open the Plate Lineup pane after New File returns (Qt timer),
+        so it is not created inside the Workfiles2 action."""
+        def _open():
+            try:
+                pl._open_pane()
+            except Exception as exc:
+                self._debug_log("auto lineup: pane could not open: %r" % exc)
+                nuke.tprint("[scene_op] Plate Lineup pane could not open: %s"
+                            % exc)
+        try:
+            from sgtk.platform.qt import QtCore
+            QtCore.QTimer.singleShot(0, _open)
+        except Exception:
+            _open()
+
     # -------------------------------------------------------------------------
     # tk-nuke-writenode app lookup (with retry)
     # -------------------------------------------------------------------------
@@ -1142,6 +1276,7 @@ class SceneOperation(HookClass):
         self._place(viewer, "viewer", origin)
         self._apply_cut_marks(near=write)  # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
         self._build_difference_qc(dot_working, dot_write, origin)  # STUDIO_NEWFILE_LAYOUT_2026_11_03
+        self._auto_plate_lineup(context, engine)  # STUDIO_NEWFILE_AUTO_LINEUP_2026_11_16
 
         plate_summary = (
             "\n".join(
@@ -1165,11 +1300,13 @@ class SceneOperation(HookClass):
             "  → %s\n"
             "  → preset: %s (Step-based default)\n\n"
             "Regrain (DasGrain) : %s\n"
-            "QC (Difference)    : %s\n\n"
+            "QC (Difference)    : %s\n"
+            "Plate Lineup       : %s\n\n"
             "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, self._frame_range_summary(), self._cut_summary(),
                plate_summary, render_path,
-               write_preset, self._regrain_summary(), self._qc_summary())
+               write_preset, self._regrain_summary(), self._qc_summary(),
+               self._lineup_summary())
         )

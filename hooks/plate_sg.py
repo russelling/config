@@ -4,6 +4,7 @@ plate_sg.py -- the shot's plate records on Flow Production Tracking.
 
 STUDIO_PLATE_SG_2026_11_02
 STUDIO_PLATE_SG_VERSION_TC_2026_11_03
+STUDIO_PLATE_SG_PRIMARY_RANGE_2026_11_16
 
 Shared by two Nuke commands, so they can never disagree about which Flow
 record is "the plate":
@@ -114,6 +115,13 @@ BG_RE = re.compile(r"(?<![a-z0-9])bg(?P<num>\d+)(?![0-9])", re.IGNORECASE)
 ELEMENT_RE = re.compile(r"(?<![a-z0-9])(?P<kind>[a-z]{2,4}?)(?P<num>\d{1,3})(?![0-9])",
                         re.IGNORECASE)
 VERSION_RE = re.compile(r"_v(?P<v>\d+)(?![0-9])", re.IGNORECASE)
+
+# STUDIO_PLATE_SG_PRIMARY_RANGE_2026_11_16 (Mark, 2026-11-16)
+# The shot length is the PRIMARY plate's lineup start/end. Primary =
+# the first kind here that the shot has, lowest number within it,
+# latest version of that element. Used by the new-script frame range
+# (scene_operation_tk-nuke.py) and by Plate Lineup's shot range.
+PRIMARY_KINDS = ("bg", "fg", "el")
 
 _NUMBER_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
@@ -414,6 +422,76 @@ def pick_bg01(plates):
         note += " (newest of %d: %s)" % (
             len(hits), ", ".join(plate_code(p) for p in hits))
     return hits[0], note
+
+
+# STUDIO_PLATE_SG_PRIMARY_RANGE_2026_11_16
+def _newness(plate):
+    """Sort key: highest _v### in the code, then newest record."""
+    return (code_version(plate_code(plate)), plate.get("id") or 0)
+
+
+def latest_by_element(plates):
+    """{('bg', 1): plate, ('el', 2): plate, ...} -- the latest version of
+    every element. Plates whose code names no element are left out."""
+    out = {}
+    for plate in plates or []:
+        key = element_key(plate_code(plate))
+        if key is None:
+            continue
+        if key not in out or _newness(plate) > _newness(out[key]):
+            out[key] = plate
+    return out
+
+
+def element_label(key):
+    """'BG01' for ('bg', 1)."""
+    return ("%s%02d" % key).upper() if key else "?"
+
+
+def pick_primary_plate(plates, kinds=PRIMARY_KINDS):
+    """(plate, key, note) for the primary plate: the first kind in
+    `kinds` the shot has, lowest number, latest version. (None, None,
+    reason) if the shot has none of those kinds."""
+    latest = latest_by_element(plates)
+    for kind in kinds:
+        numbers = sorted(n for (k, n) in latest if k == kind)
+        if not numbers:
+            continue
+        key = (kind, numbers[0])
+        plate = latest[key]
+        versions = [p for p in plates if element_key(plate_code(p)) == key]
+        note = "%s plate %s" % (element_label(key), plate_code(plate))
+        if len(versions) > 1:
+            note += " (latest of %d)" % len(versions)
+        return plate, key, note
+    return None, None, "no %s plate on Flow (%d plate record%s)" % (
+        "/".join(k.upper() for k in kinds), len(plates or []),
+        "" if len(plates or []) == 1 else "s")
+
+
+def primary_plate_range(plates, fields):
+    """(first, last, how) from the primary plate's lineup start / end
+    (shot frames, handles included). (None, None, reason) when there
+    is no primary plate or its lineup is empty / unusable."""
+    plate, key, note = pick_primary_plate(plates)
+    if plate is None:
+        return None, None, note
+    start_f, end_f = fields.get("lineup_start"), fields.get("lineup_end")
+    if not start_f or not end_f:
+        return None, None, "%s, but Flow has no %s / %s field" % (
+            note, LINEUP_FIELDS["lineup_start"], LINEUP_FIELDS["lineup_end"])
+    first, last = to_number(plate.get(start_f)), to_number(plate.get(end_f))
+    if first is None or last is None:
+        return None, None, "%s has no lineup start/end (%s / %s)" % (
+            note, display_value(plate.get(start_f)),
+            display_value(plate.get(end_f)))
+    if first != int(first) or last != int(last):
+        return None, None, "%s lineup %g-%g is not whole frames" % (
+            note, first, last)
+    if last < first:
+        return None, None, "%s lineup %d-%d ends before it starts" % (
+            note, first, last)
+    return int(first), int(last), "%s lineup start/end" % note
 
 
 # ---------------------------------------------------------------------------
