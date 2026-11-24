@@ -1,0 +1,53 @@
+MIT License — applies to the source code in this repository only.
+Third-party dependencies listed below have their own license terms.
+
+Copyright (c) 2026 bratgot
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party dependencies
+------------------------
+
+Qt 5.15
+  License: GNU Lesser General Public License v3 (LGPL-3.0)
+  This software dynamically links against Qt libraries. Users may relink
+  against a modified version of Qt in accordance with the LGPL.
+  https://www.qt.io/licensing/
+
+Python 3.9
+  License: Python Software Foundation License (PSF-2.0)
+  https://docs.python.org/3/license.html
+
+Windows SDK (DWM / SetWindowCompositionAttribute)
+  License: Microsoft Windows SDK License Agreement (proprietary)
+  The DWM blur effect uses dwmapi.lib and the undocumented
+  SetWindowCompositionAttribute API, both part of the Windows SDK.
+  These are free to call from applications but are NOT MIT-licensed.
+  Redistribution of Windows SDK binaries (dwmapi.dll etc.) is governed
+  by Microsoft's terms — however dwmapi.dll ships with Windows itself
+  and does not need to be redistributed.
+  https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
+
+Nuke NDK
+  License: Foundry Nuke Non-Commercial / Commercial License
+  This plugin interfaces with Nuke via its public NDK and Python API.
+  Use requires a valid Nuke license from The Foundry.
+  https://www.foundry.com/products/nuke

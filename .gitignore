@@ -1,24 +1,47 @@
-# macOS
-.DS_Store
+# STUDIO_CONFIG_REPO_ROOT_2026_11_24
+# github.com/russelling/config starts here, at repo/pipeline/config/: the
+# Toolkit config (flow/current/config/) plus the Nuke (nuke/) and Blender
+# (blender/) tools. THIS REPO IS PUBLIC.
 
-# Python bytecode
+# macOS / Python
+.DS_Store
 __pycache__/
 *.py[cod]
 
-# ShotGrid credentials -- never commit.
-# core/shotgun.yml held a live api_script/api_key in a PUBLIC repo until
-# 2026-09-13. The key has been rotated; keep both spellings ignored, including
-# the editor backup that leaked alongside it.
-core/shotgun.yml
-core/shotgun.yml.save
-core/shotgun.yml.*
+# Toolkit runtime next to the config: not source, rebuilt by Toolkit.
+flow/current/install/
+flow/current/cache/
+flow/current/logs/
+flow/current/resources/
+flow/current/outputlog.txt
+flow/current/tank
+flow/current/tank.bat
 
-# Toolkit local state
-core/install_location.yml
+# Separate repos (BUF_Mac_watcher, ingest_pipeline, ...), moving to
+# repo/pipeline/services/. Never part of this repo.
+flow/alts/
 
-# Backups this cleanup script leaves behind
-.gitignore.bak.*
+# Large and third-party binaries stay on the share, out of git.
+blender/assets/
+blender/library/
+blender/DansTools/
+blender/JoeTools/
+nuke/DansTools/
+*.zip
+*.dll
+*.blend
+*.blend1
 
-# Tombstones the SMB mount leaves when a delete of an open file is attempted.
-# One of these (.smbdeleteAAA50002650b) was committed to this repo by accident.
+# Backups belong in a _removed_*/ quarantine, not here.
+*.bak
+*.bak[0-9]*
+*.bak.*
+*.bu
+*~
 .smbdelete*
+
+# Credentials. Also ignored by flow/current/config/.gitignore; repeated here
+# so they stay ignored even if that file is edited.
+flow/current/config/core/shotgun.yml
+flow/current/config/core/shotgun.yml.*
+flow/current/config/core/install_location.yml

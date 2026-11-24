@@ -1,0 +1,6 @@
+Marker Timebar for Nuke -- third-party, MIT (see LICENSE).
+Upstream: https://github.com/bratgot/Timebarmarkers
+Commit:   d3622f3 (2026-03-21), file python/marker_timebar.py, unmodified.
+Installed by repo/pipeline/dev/patches_2026-11-17/patch_nuke_marker_timebar.py
+To update: replace marker_timebar.py with a newer upstream copy, test in Nuke,
+update this file.

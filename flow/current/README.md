@@ -1,0 +1,2 @@
+# buffalo_flow_config
+FlowTrackingConfig

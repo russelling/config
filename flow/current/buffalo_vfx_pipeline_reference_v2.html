@@ -1,0 +1,249 @@
+<h2 class="sr-only">Buffalo VFX Pipeline Configuration Reference</h2>
+<style>
+.ref{max-width:680px;padding:2rem 0;font-size:15px;line-height:1.7;color:var(--color-text-primary)}
+.ref h1{font-size:22px;font-weight:500;margin:0 0 0.25rem}
+.ref .sub{font-size:13px;color:var(--color-text-secondary);margin:0 0 2rem}
+.ref h2{font-size:18px;font-weight:500;margin:2.5rem 0 0.75rem;padding-top:2rem;border-top:0.5px solid var(--color-border-tertiary)}
+.ref h3{font-size:15px;font-weight:500;margin:1.5rem 0 0.5rem}
+.ref p{margin:0 0 0.75rem}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:0.75rem 0 1.25rem}
+th{text-align:left;font-weight:500;font-size:12px;color:var(--color-text-secondary);padding:6px 10px;border-bottom:0.5px solid var(--color-border-tertiary)}
+td{padding:7px 10px;border-bottom:0.5px solid var(--color-border-tertiary);vertical-align:top}
+tr:last-child td{border-bottom:none}
+code{font-family:var(--font-mono);font-size:12px;background:var(--color-background-secondary);padding:1px 5px;border-radius:3px}
+.tree{font-family:var(--font-mono);font-size:12.5px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:1rem 1.25rem;margin:0.75rem 0 1.25rem;line-height:2}
+.tree .dim{color:var(--color-text-tertiary)}
+.tree .hi{color:var(--color-text-primary);font-weight:500}
+.tree .note{color:var(--color-text-secondary);font-style:italic;font-size:11.5px}
+.tree .file{color:var(--color-text-secondary)}
+.callout{border-left:2px solid var(--color-border-primary);padding:0.75rem 1rem;margin:1rem 0;font-size:13.5px;color:var(--color-text-secondary)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0.75rem 0 1.25rem}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem}
+.card h4{font-size:13px;font-weight:500;margin:0 0 0.4rem}
+.card p{font-size:13px;color:var(--color-text-secondary);margin:0;line-height:1.5}
+.wip{list-style:none;margin:0.5rem 0 1rem;padding:0}
+.wip li{font-size:13px;padding:6px 0;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;gap:10px;align-items:flex-start}
+.wip li:last-child{border-bottom:none}
+.wip li::before{content:"○";color:var(--color-text-tertiary);font-size:11px;padding-top:3px;flex-shrink:0}
+.badge{display:inline-block;font-size:11px;font-weight:500;padding:2px 7px;border-radius:3px;margin-right:3px}
+.b-teal{background:#E1F5EE;color:#085041}
+.b-amber{background:#FAEEDA;color:#633806}
+.b-gray{background:#F1EFE8;color:#444441}
+.b-blue{background:#E6F1FB;color:#0C447C}
+@media(prefers-color-scheme:dark){
+.b-teal{background:#085041;color:#9FE1CB}
+.b-amber{background:#633806;color:#FAC775}
+.b-gray{background:#444441;color:#D3D1C7}
+.b-blue{background:#0C447C;color:#B5D4F4}
+}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:0.5rem 0 1rem;align-items:center}
+.step{font-family:var(--font-mono);font-size:12px;padding:3px 10px;border-radius:3px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary)}
+.step.primary{background:#E1F5EE;color:#085041;border-color:#9FE1CB;font-weight:500}
+@media(prefers-color-scheme:dark){.step.primary{background:#085041;color:#9FE1CB;border-color:#0F6E56}}
+.arr{color:var(--color-text-tertiary);font-size:11px}
+.rules{counter-reset:rules;list-style:none;margin:0.5rem 0;padding:0}
+.rules li{counter-increment:rules;font-size:13px;padding:6px 0 6px 2rem;border-bottom:0.5px solid var(--color-border-tertiary);position:relative;color:var(--color-text-secondary)}
+.rules li:last-child{border-bottom:none}
+.rules li::before{content:counter(rules);position:absolute;left:0;top:7px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);font-weight:500}
+</style>
+
+<div class="ref">
+  <h1>Buffalo VFX — Pipeline Configuration Reference</h1>
+  <p class="sub">Flow Production Tracking (ShotGrid) Toolkit &nbsp;·&nbsp; TV/Episodic &nbsp;·&nbsp; June 2026 &nbsp;·&nbsp; <code>github.com/russelling/config</code> · main</p>
+
+  <h2>Project identity</h2>
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>ShotGrid site</td><td><code>buffalovfx.shotgrid.autodesk.com</code></td></tr>
+    <tr><td>Config repo</td><td><code>github.com/russelling/config</code> &nbsp;·&nbsp; branch: <code>main</code></td></tr>
+    <tr><td>Production type</td><td>TV / Episodic</td></tr>
+    <tr><td>Platforms</td><td>macOS &nbsp;·&nbsp; Windows &nbsp;·&nbsp; Linux</td></tr>
+    <tr><td>Config path (Windows)</td><td><code>C:\Volumes\atv-post-lucid3\atv-buffalo-s03\buffalo_vfx\repo\pipeline\config\flow\current</code></td></tr>
+  </table>
+
+  <h2>Entity hierarchy</h2>
+  <div class="tree">
+    <span class="hi">Show</span> <span class="dim">(Project)</span><br>
+    <span class="dim">&nbsp;&nbsp;└─ </span><span class="hi">Episode</span> &nbsp;<span class="file">code: <code>301</code>, <code>302</code>, <code>303</code></span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">Scene</span> &nbsp;<span class="file">code: <code>001</code>, <code>002</code>, <code>003</code> &nbsp;·&nbsp; linked to Episode via <code>sg_episode</code></span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">Shot</span> &nbsp;<span class="file">code: <code>301_001_010</code>, <code>301_001_020</code> &nbsp;·&nbsp; linked to Scene via <code>sg_scene</code></span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">Task</span> &nbsp;<span class="file">tied to Pipeline Step e.g. <code>temp</code>, <code>comp</code></span>
+  </div>
+  <div class="callout">The <code>pick_environment.py</code> hook checks whether <code>Shot.sg_scene</code> is populated. If it is → <code>episode_shot_step</code> loads. If not → falls back to <code>shot_step</code>. Every shot must be linked to a Scene for the episodic config to activate.</div>
+
+  <h2>On-disk folder structure</h2>
+  <p>Full example: Episode <code>301</code>, Scene <code>001</code>, Shot <code>301_001_010</code>.</p>
+  <div class="tree">
+    <span class="hi">shots/</span><br>
+    <span class="dim">&nbsp;&nbsp;└─ </span><span class="hi">301/</span> <span class="note">&nbsp;← Episode code</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">001/</span> <span class="note">&nbsp;← Scene code</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">301_001_010/</span> <span class="note">&nbsp;← Shot code</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="hi">plates/</span> <span class="note">&nbsp;← source plates — shared across all steps</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="hi">render/</span> <span class="note">&nbsp;← EXR outputs — shared</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="hi">review/</span> <span class="note">&nbsp;← dailies / quicktimes — shared</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="hi">reference/</span> <span class="note">&nbsp;← reference material — shared</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="hi">temp/</span> <span class="note">&nbsp;← Pipeline Step</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">nuke/</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="file">301_001_010_temp_v001.nk</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="dim">snapshots/</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">comp/</span> <span class="note">&nbsp;← Pipeline Step</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="hi">nuke/</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ </span><span class="file">301_001_010_comp_v001.nk</span><br>
+    <span class="dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ </span><span class="dim">snapshots/</span>
+  </div>
+  <div class="callout"><code>plates</code>, <code>render</code>, <code>review</code>, <code>reference</code> live at the shot level — shared across all steps. No <code>work/</code> or <code>publish/</code> subfolder. Scripts sit directly in <code>nuke/</code> under the step.</div>
+
+  <h2>File naming convention</h2>
+  <p>Pattern: <code>{Shot}_{Step}_v{version}.{ext}</code></p>
+  <p>The Shot code (<code>301_001_010</code>) already contains the full <code>{Episode}_{Scene}_{shot_num}</code> composite — episode and scene are not repeated separately in filenames.</p>
+  <table>
+    <tr><th>Type</th><th>Example</th><th>Template</th></tr>
+    <tr><td>Nuke script</td><td><code>301_001_010_comp_v003.nk</code></td><td><code>ep_nuke_shot_work</code></td></tr>
+    <tr><td>Nuke snapshot</td><td><code>301_001_010_comp_v003_20260601.nk</code></td><td><code>ep_nuke_shot_snapshot</code></td></tr>
+    <tr><td>Maya scene</td><td><code>301_001_010_comp_v001.ma</code></td><td><code>ep_maya_shot_work</code></td></tr>
+    <tr><td>EXR render sequence</td><td><code>301_001_010_comp_v003/301_001_010_comp_v003.0001.exr</code></td><td><code>ep_nuke_shot_render_work</code></td></tr>
+    <tr><td>Review quicktime</td><td><code>301_001_010_comp_v003.mov</code></td><td><code>ep_nuke_shot_render_movie</code></td></tr>
+    <tr><td>Plates sequence</td><td><code>301_001_010_plate.0001.exr</code></td><td><code>ep_shot_plates</code></td></tr>
+    <tr><td>CDL grade file</td><td><code>301_001_010_BG1.cdl</code></td><td><code>ep_shot_cdl</code></td></tr>
+  </table>
+  <div class="two-col">
+    <div class="card"><h4>Version padding</h4><p>3 digits, zero-padded &nbsp;·&nbsp; <code>v001</code> &nbsp;<code>v002</code> &nbsp;<code>v010</code></p></div>
+    <div class="card"><h4>Frame padding</h4><p>4 digits, zero-padded &nbsp;·&nbsp; <code>0001</code> &nbsp;<code>0042</code> &nbsp;<code>1024</code></p></div>
+  </div>
+
+  <h2>Pipeline steps</h2>
+  <h3>Shot steps</h3>
+  <div class="steps">
+    <span class="step">dev</span><span class="arr">→</span>
+    <span class="step">model</span><span class="arr">→</span>
+    <span class="step">rig</span><span class="arr">→</span>
+    <span class="step">anim</span><span class="arr">→</span>
+    <span class="step">fx</span><span class="arr">→</span>
+    <span class="step">light</span><span class="arr">→</span>
+    <span class="step primary">temp</span><span class="arr">→</span>
+    <span class="step primary">comp</span><span class="arr">→</span>
+    <span class="step">mograph</span><span class="arr">→</span>
+    <span class="step">editorial</span><span class="arr">→</span>
+    <span class="step">deliverable</span>
+  </div>
+  <h3>Asset steps</h3>
+  <div class="steps">
+    <span class="step">model</span><span class="arr">→</span>
+    <span class="step">rig</span><span class="arr">→</span>
+    <span class="step">lookdev</span><span class="arr">→</span>
+    <span class="step">fx</span>
+  </div>
+  <div class="callout">All shots begin as <code>temp</code>. Once the cut is locked, selected shots are finished in-house as <code>comp</code> or sent to an outside vendor. The <code>review/</code> folder at the shot level holds dailies from both steps, keeping the version history unified per shot in ShotGrid.</div>
+
+  <h2>Entity naming conventions</h2>
+  <table>
+    <tr><th>Entity</th><th>Pattern</th><th>Examples</th></tr>
+    <tr><td>Episodes</td><td>3-digit number</td><td><code>301</code> &nbsp;<code>302</code> &nbsp;<code>303</code></td></tr>
+    <tr><td>Scenes</td><td>3-digit number</td><td><code>001</code> &nbsp;<code>002</code> &nbsp;<code>003</code></td></tr>
+    <tr><td>Shots</td><td><code>{Episode}_{Scene}_{num}</code> · num increments of 10</td><td><code>301_001_010</code> &nbsp;<code>301_001_020</code> &nbsp;<code>301_002_010</code></td></tr>
+    <tr><td>Assets</td><td>PascalCase</td><td><code>HeroCharacter</code> &nbsp;<code>CityBlock_A</code></td></tr>
+    <tr><td>Asset types</td><td>Title case</td><td><code>Character</code> &nbsp;<code>Prop</code> &nbsp;<code>Environment</code> &nbsp;<code>Vehicle</code> &nbsp;<code>FX</code></td></tr>
+  </table>
+
+  <h2>Software stack</h2>
+  <table>
+    <tr><th>DCC</th><th>Engine</th><th>Contexts</th><th>Notes</th></tr>
+    <tr><td>Nuke 17.0 / 15.1</td><td><code>tk-nuke</code></td><td>Shot steps</td><td>Primary comp tool</td></tr>
+    <tr><td>Maya</td><td><code>tk-maya</code></td><td>Shots + Assets</td><td>Modeling, rigging, animation, FX, lighting</td></tr>
+    <tr><td>Blender</td><td><code>tk-blender</code></td><td>Shots + Assets</td><td>Supplemental modeling / previz</td></tr>
+    <tr><td>Unreal Engine</td><td><code>tk-unreal</code></td><td>Shots</td><td>Virtual production. Hardcoded launcher.</td></tr>
+    <tr><td>After Effects</td><td><code>tk-aftereffects</code></td><td>Shots</td><td>Mograph, editorial finishing</td></tr>
+    <tr><td>Premiere Pro</td><td>none</td><td>Project</td><td>Launch only — no Toolkit engine</td></tr>
+  </table>
+
+  <h2>Environment routing</h2>
+  <table>
+    <tr><th>Context</th><th>Environment</th><th>Key settings file</th></tr>
+    <tr><td>No entity</td><td><code>project.yml</code></td><td><code>tk-desktop.yml</code></td></tr>
+    <tr><td>Shot, no step</td><td><code>project.yml</code></td><td>—</td></tr>
+    <tr><td>Shot + step, <code>sg_scene</code> set</td><td><code>episode_shot_step.yml</code></td><td><code>tk-nuke-episodic.yml</code></td></tr>
+    <tr><td>Shot + step, no <code>sg_scene</code></td><td><code>shot_step.yml</code></td><td><code>tk-nuke.yml</code></td></tr>
+    <tr><td>Asset + step</td><td><code>asset_step.yml</code></td><td><code>tk-maya.yml</code></td></tr>
+  </table>
+
+  <h2>Template aliases and keys</h2>
+  <h3>Path aliases</h3>
+  <table>
+    <tr><th>Alias</th><th>Resolves to</th><th>Used for</th></tr>
+    <tr><td><code>shot_root</code></td><td><code>shots/{Episode}/{Scene}/{Shot}/{Step}</code></td><td>Step-level: <code>nuke/</code>, <code>maya/</code></td></tr>
+    <tr><td><code>shot_base</code></td><td><code>shots/{Episode}/{Scene}/{Shot}</code></td><td>Shot-level: <code>plates/</code> <code>render/</code> <code>review/</code></td></tr>
+    <tr><td><code>asset_root</code></td><td><code>assets/{sg_asset_type}/{Asset}/{Step}</code></td><td>All asset templates</td></tr>
+  </table>
+  <h3>Template keys</h3>
+  <table>
+    <tr><th>Key</th><th>Type</th><th>Example</th><th>Notes</th></tr>
+    <tr><td><code>Episode</code></td><td>str</td><td><code>301</code></td><td>ShotGrid Episode.code</td></tr>
+    <tr><td><code>Scene</code></td><td>str</td><td><code>001</code></td><td>ShotGrid Scene.code</td></tr>
+    <tr><td><code>Shot</code></td><td>str</td><td><code>301_001_010</code></td><td>ShotGrid Shot.code — composite key</td></tr>
+    <tr><td><code>Step</code></td><td>str</td><td><code>comp</code></td><td>Must match ShotGrid Pipeline Step short code exactly</td></tr>
+    <tr><td><code>version</code></td><td>int pad 3</td><td><code>001</code></td><td></td></tr>
+    <tr><td><code>SEQ</code></td><td>sequence pad 4</td><td><code>0001</code></td><td>Frame sequences</td></tr>
+    <tr><td><code>nuke_extension</code></td><td>str</td><td><code>nk</code></td><td>Default: <code>nk</code>. Also: <code>nknc</code></td></tr>
+    <tr><td><code>maya_extension</code></td><td>str</td><td><code>ma</code></td><td>Default: <code>ma</code>. Also: <code>mb</code></td></tr>
+    <tr><td><code>sg_asset_type</code></td><td>str</td><td><code>Character</code></td><td>Asset type folder name</td></tr>
+    <tr><td><code>Asset</code></td><td>str</td><td><code>HeroCharacter</code></td><td>PascalCase</td></tr>
+  </table>
+
+  <h2>Review workflow</h2>
+  <p>Both tools write to <code>shots/301/001/301_001_010/review/</code> and create a ShotGrid Version automatically.</p>
+  <div class="two-col">
+    <div class="card">
+      <h4>Quick review</h4>
+      <p>Proxy H.264 .mov rendered directly from the comp. No Write nodes executed. Fast — use for all dailies during temp work.</p>
+    </div>
+    <div class="card">
+      <h4>Submit for review</h4>
+      <p>More control over slates and burnins. Also proxy only. Use for formal supervisor submissions.</p>
+    </div>
+  </div>
+  <div class="callout">Write nodes (full EXR renders → <code>render/</code>) must be executed manually. Full renders are expected only when a shot graduates to <code>comp</code> or is being delivered.</div>
+
+  <h2>Colour pipeline</h2>
+  <table>
+    <tr><th>File</th><th>Location</th><th>Template</th></tr>
+    <tr><td>Plate sequence</td><td><code>shots/301/001/301_001_010/plates/301_001_010_plate.0001.exr</code></td><td><code>ep_shot_plates</code></td></tr>
+    <tr><td>CDL grade</td><td><code>shots/301/001/301_001_010/plates/301_001_010_BG1.cdl</code></td><td><code>ep_shot_cdl</code></td></tr>
+    <tr><td>Show LUT</td><td><code>color/luts/ARRILogC4_SEV_S3_V3_digital_R709.cube</code></td><td><code>ep_shot_show_lut</code></td></tr>
+  </table>
+
+  <h2>App versions</h2>
+  <table>
+    <tr><th>App / Engine</th><th>Version</th><th>App / Engine</th><th>Version</th></tr>
+    <tr><td><code>tk-desktop</code></td><td>v2.8.5</td><td><code>tk-multi-workfiles2</code></td><td>v0.13.4</td></tr>
+    <tr><td><code>tk-nuke</code></td><td>v0.14.1</td><td><code>tk-multi-publish2</code></td><td>v2.9.1</td></tr>
+    <tr><td><code>tk-maya</code></td><td>v0.14.0</td><td><code>tk-multi-snapshot</code></td><td>v0.9.2</td></tr>
+    <tr><td><code>tk-blender</code></td><td>v1.0.0</td><td><code>tk-nuke-writenode</code></td><td>v1.3.8</td></tr>
+    <tr><td><code>tk-unreal</code></td><td>v1.4.4</td><td><code>tk-nuke-reviewsubmission</code></td><td>v0.5.0</td></tr>
+    <tr><td><code>tk-aftereffects</code></td><td>v1.5.0</td><td></td><td></td></tr>
+  </table>
+
+  <h2>Outstanding items</h2>
+  <ul class="wip">
+    <li><code>tank cache_apps</code> not yet run — required after first install against a live project</li>
+    <li>Unreal publish workflow — <code>tk-unreal</code> publish plugins stubbed; <code>.umap</code> export pipeline not yet defined</li>
+    <li>Premiere Pro launcher — launch-only; no <code>tk-premiere</code> engine exists</li>
+    <li>Maya and Blender review submission hooks not yet configured</li>
+    <li>USD pipeline — templates exist; USD export publish plugin not yet written</li>
+    <li>Permissions — <code>process_folder_creation.py</code> has placeholder <code>os.chmod</code>; set actual studio permissions</li>
+    <li>Season support — hierarchy is Episode-only; Season entity not yet accounted for</li>
+  </ul>
+
+  <h2>Rules for Claude across sessions</h2>
+  <ol class="rules">
+    <li>Read <code>PIPELINE_REFERENCE.md</code> before writing any YAML or Python.</li>
+    <li>Cross-platform paths always — every path needs <code>linux_path</code>, <code>mac_path</code>, <code>windows_path</code>.</li>
+    <li>Templates before schema — define schema <code>.yml</code> first, then add template keys.</li>
+    <li>Use <code>shot_base</code> for shared shot-level folders (plates, render, review, reference). Use <code>shot_root</code> for step-level folders (nuke/, maya/).</li>
+    <li>No <code>work/</code> or <code>publish/</code> subfolders under steps — scripts sit directly in <code>nuke/</code>, <code>maya/</code> etc.</li>
+    <li>Step codes must exactly match ShotGrid Pipeline Steps. Flag mismatches — never silently change one side.</li>
+    <li>Version pinning — all <code>location:</code> blocks must pin to a specific version. Update the versions table when bumping.</li>
+    <li>Update the WIP list when items are resolved or new gaps are identified.</li>
+    <li>No credentials or real paths in commits — use <code>config/paths.local.yml</code> (gitignored).</li>
+    <li>Prefer includes over duplication — shared blocks go in <code>env/includes/settings/</code>.</li>
+  </ol>
+</div>
