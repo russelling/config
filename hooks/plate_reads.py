@@ -99,6 +99,22 @@ PLATE_COLORSPACE_CANDIDATES = (
 )
 
 
+# STUDIO_PLATE_READS_LEAN_2026_11_16
+_FRAME_TOKEN_RE = re.compile(r"(#+|%0?\d*d|\d+)(\.exr)$", re.IGNORECASE)
+
+
+def path_key(path):
+    """Identity of a plate sequence for 'is this Read already here?':
+    last three path parts (element folder / resolution folder / file),
+    lower case, '/' separators, frame token collapsed to '#'. Immune to
+    drive letters, path substitutions and #### vs %04d."""
+    if not path:
+        return ""
+    parts = [p for p in str(path).replace("\\", "/").split("/") if p]
+    tail = "/".join(parts[-3:]).lower()
+    return _FRAME_TOKEN_RE.sub(r"#\2", tail)
+
+
 # ---------------------------------------------------------------------------
 # Scanning (no nuke import - unit testable off a plain folder tree)
 # ---------------------------------------------------------------------------
@@ -392,17 +408,36 @@ def resolve_plate_colorspace(read_node):
 
 
 def existing_read_paths():
-    """Normalised file paths of the Read nodes already in this script."""
+    """path_key()s of the Read nodes already in this script."""
+    return set(existing_reads())
+
+
+def existing_reads():
+    """{path_key: Read node} for the top-level Reads of this script.
+    STUDIO_PLATE_READS_LEAN_2026_11_16"""
     import nuke
-    paths = set()
-    for node in nuke.allNodes("Read"):
+    out = {}
+    for node in nuke.allNodes("Read", nuke.root()):
         try:
             value = node["file"].value()
         except Exception:
             continue
-        if value:
-            paths.add(os.path.normpath(value))
-    return paths
+        key = path_key(value)
+        if key and key not in out:
+            out[key] = node
+    return out
+
+
+def find_read(record):
+    """The Read already in the script for this plate record, or None.
+    A miss prints what was compared, for the Script Editor."""
+    reads = existing_reads()
+    want = path_key(record.get("nuke_path"))
+    node = reads.get(want)
+    if node is None:
+        print("[plate_reads] no Read matches %r (have: %s)"
+              % (want, ", ".join(sorted(reads)) or "none"))
+    return node
 
 
 def make_read(record, primary=False, note=""):
@@ -420,37 +455,25 @@ def make_read(record, primary=False, note=""):
     read["origfirst"].setValue(record["first"])
     read["origlast"].setValue(record["last"])
 
-    colorspace = resolve_plate_colorspace(read)
-    if colorspace:
-        colour_note = colorspace
-    else:
-        # The config has none of the ACES names - do not pretend.
+    if not resolve_plate_colorspace(read):
+        # The config has none of the ACES names: read raw (plates are
+        # treated as ACEScg working space - scene_operation_tk-nuke.py).
         read["raw"].setValue(True)
         try:
             read["colorspace"].setValue("raw")
         except Exception:
             pass
-        colour_note = "raw — SET COLORSPACE MANUALLY"
 
-    lines = ["PLATE: %s" % record["element"] if primary
-             else "PLATE (extra): %s" % record["element"]]
+    # STUDIO_PLATE_READS_LEAN_2026_11_16 (Mark): one short line,
+    # "BG01 v01  1001-1259". primary / note are kept as arguments for
+    # callers but no longer shown.
+    label = record["element"]
     if record["version"]:
-        lines[0] += " v%02d" % record["version"]
+        label += " v%02d" % record["version"]
+    label += "  %d-%d" % (record["first"], record["last"])
     if record.get("older"):
-        lines.append("OLDER DELIVERY - a newer version is on disk")
-    lines.append("%s — %d-%d" % (colour_note, record["first"], record["last"]))
-    if record["resolution"]:
-        lines.append(record["resolution"])
-    if record.get("superseded"):
-        # Version 0 is "no _v## suffix at all", not "v00".
-        lines.append("older on disk: %s" % ", ".join(
-            "unversioned" if v == 0 else "v%02d" % v
-            for v in record["superseded"]))
-    if record.get("alternates"):
-        lines.append("also at: %s" % ", ".join(record["alternates"]))
-    if note:
-        lines.append(note)
-    read["label"].setValue("\n".join(lines))
+        label += "\nOLDER DELIVERY"
+    read["label"].setValue(label)
     return read
 
 
@@ -523,7 +546,7 @@ def load_shot_plates():
     already = existing_read_paths()
     created, skipped = [], []
     for record in records:
-        if os.path.normpath(record["nuke_path"]) in already:
+        if path_key(record["nuke_path"]) in already:
             skipped.append(describe(record))
             continue
         for selected in nuke.selectedNodes():

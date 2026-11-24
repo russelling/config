@@ -233,6 +233,35 @@ NEWFILE_LAYOUT = {
 NEWFILE_BACKDROP_SIZE = (310, 968)
 NEWFILE_BACKDROP_LABEL = "REGRAIN - DasGrain (dis)\nDiff Matte"
 
+# STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21 (Mark, 2026-11-21)
+# New scripts take their regrain / degrain layout from Mark's template,
+# pasted at build time - edit the .nk, not this hook. The NEWFILE_LAYOUT
+# main line above is only the fallback when the file is missing or can't
+# be used; the build message says which one ran.
+# Bump NEWFILE_TEMPLATE_VERSION / _DATE whenever the new-file graph
+# changes: both go on the TemplateInfo sticky note of every new script.
+NEWFILE_TEMPLATE_VERSION = "1.0"
+NEWFILE_TEMPLATE_DATE = "2026-11-21"
+DASGRAIN_TEMPLATE_REL = ("pipeline", "config", "nuke", "DansTools", "dasgraintemplate.nk")
+DASGRAIN_TEMPLATE_ENV = "BUF_NEWFILE_DASGRAIN_TEMPLATE"
+TEMPLATE_PLATE_LABEL = "MAIN PLATE HERE"   # this Dot's input is replaced by the plate Read
+TEMPLATE_WRITE_CLASS = "WriteTank"         # rebuilt for this shot by tk-nuke-writenode
+TEMPLATE_WRITE_MARKER = "BUF_template_write"
+TEMPLATE_DROP_CLASSES = ("Viewer",)        # rebuilt for this shot
+TEMPLATE_VIEWER_BELOW_WRITE = 170
+TEMPLATE_NANFIX_NODE = "Fix_nan_pixels"
+# The template's NaN fix reads a root knob that doesn't exist; it becomes
+# a "fix NaN pixels" checkbox (default on) on the node itself.
+TEMPLATE_NANFIX_BAD_EXPR = "{{!parent.nanfix}}"
+NEATVIDEO_CLASS = "OFXcom.absoft.NeatVideo5_v5"
+# Sticky notes above the plate Read.
+EFFECT_INSTRUCTIONS_FIELD = "sg_plt_effect_instructions"   # on the BG01 plate
+TEMPLATE_NOTE_NAME = "TemplateInfo"
+EFFECT_NOTE_NAME = "BG01_EffectInstructions"
+INFO_NOTE_FONT_SIZE = 20
+INFO_NOTE_GAP = 120
+EFFECT_NOTE_X = 520
+
 # Matches an EXR frame like "301_001_010_takeA.1001.exr" or
 # "301_001_010_takeA_1001.exr" -> base="301_001_010_takeA", frame="1001".
 # Anything under plates/ that doesn't match this is treated as a single,
@@ -622,7 +651,7 @@ class SceneOperation(HookClass):
         if entity.get("type") != "Shot" or not entity.get("id"):
             return None
         try:
-            shot = self.parent.shotgun.find_one(
+            shot = self._sg().find_one(
                 "Shot", [["id", "is", entity["id"]]],
                 [SG_FRAME_IN_FIELD, SG_FRAME_OUT_FIELD],
             )
@@ -664,6 +693,20 @@ class SceneOperation(HookClass):
                 return (record["first"], record["last"]), record["relpath"]
         return None, None
 
+    # STUDIO_SCENE_OP_REAL_SG_2026_11_16
+    def _sg(self):
+        """The real Flow connection. Workfiles2's app.shotgun is a logging
+        wrapper (DebugWrapperShotgun) that only has find / find_one /
+        create / update / insert, so schema reads through it fail."""
+        wrapped = self.parent.shotgun
+        real = getattr(wrapped, "_sg", None)
+        if real is not None:
+            return real
+        try:
+            return self.parent.sgtk.shotgun
+        except Exception:
+            return wrapped
+
     # STUDIO_NEWFILE_RANGE_FROM_PLATE_2026_11_16
     def _load_hook_module(self, name):
         """hooks/<name>.py, loaded fresh by path under a private module
@@ -689,7 +732,7 @@ class SceneOperation(HookClass):
             return cached[1], cached[2]
         ps = self._load_hook_module("plate_sg")
         data = ps.fetch_shot_plates(
-            self.parent.shotgun, {"type": "Shot", "id": entity["id"]})
+            self._sg(), {"type": "Shot", "id": entity["id"]})
         self._flow_plates_cache = (entity.get("id"), ps, data)
         return ps, data
 
@@ -765,7 +808,7 @@ class SceneOperation(HookClass):
         if "fields" in cache:
             return cache["fields"]
         try:
-            schema = self.parent.shotgun.schema_field_read("Shot")
+            schema = self._sg().schema_field_read("Shot")
         except Exception as exc:
             self._debug_log("handles: Shot schema read failed: %r" % exc)
             return None, None
@@ -797,7 +840,7 @@ class SceneOperation(HookClass):
                     "not marked - no %s / %s field found on Shot"
                     % (SG_HANDLES_HEAD_NAMES[0], SG_HANDLES_TAIL_NAMES[0]))
                 return None
-            shot = self.parent.shotgun.find_one(
+            shot = self._sg().find_one(
                 "Shot", [["id", "is", entity["id"]]], [head_f, tail_f]) or {}
             head, tail = shot.get(head_f), shot.get(tail_f)
             if head in (None, "") or tail in (None, ""):
@@ -978,6 +1021,357 @@ class SceneOperation(HookClass):
         except Exception as exc:
             self._qc_note = "NOT ADDED - error: %s" % exc
             self._debug_log("difference QC failed: %r" % exc)
+
+    # STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21
+    @staticmethod
+    def _dasgrain_template_path():
+        """repo/pipeline/config/nuke/DansTools/dasgraintemplate.nk, found
+        relative to this hook; DASGRAIN_TEMPLATE_ENV overrides."""
+        override = os.environ.get(DASGRAIN_TEMPLATE_ENV)
+        if override:
+            return os.path.normpath(override)
+        repo = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(6):
+            repo = os.path.dirname(repo)
+        return os.path.normpath(os.path.join(repo, *DASGRAIN_TEMPLATE_REL))
+
+    @staticmethod
+    def _node_class_available(class_name):
+        """True if this Nuke can create class_name (e.g. an OFX plug-in)."""
+        for node in nuke.selectedNodes():
+            node.setSelected(False)
+        try:
+            node = nuke.createNode(class_name, inpanel=False)
+        except Exception:
+            return False
+        try:
+            nuke.delete(node)
+        except Exception:
+            pass
+        return True
+
+    @staticmethod
+    def _template_paste_text(text, drop_classes, substitute, quiet=()):
+        """The template as text nodePaste can take without side effects:
+        the header, the window layout and the Root block are removed (Root
+        would overwrite this shot's format, range and OCIO settings), and so
+        is every top-level node whose class is in drop_classes. A top-level
+        node whose class is a key of `substitute` becomes a NoOp at the same
+        place, named substitute[class][0] and labelled substitute[class][1],
+        so the node stack - and every connection - is unchanged.
+        Returns (text, dropped names, substituted names not in `quiet`)."""
+        def _depth(line):
+            # Braces in .nk values are written escaped (\{ \}), so a plain
+            # count that skips escaped characters finds where a block ends.
+            # (A closing brace at column 0 does not: Root's gsv {} has one.)
+            d, k = 0, 0
+            while k < len(line):
+                c = line[k]
+                if c == "\\":
+                    k += 2
+                    continue
+                if c == "{":
+                    d += 1
+                elif c == "}":
+                    d -= 1
+                k += 1
+            return d
+
+        def _block_end(i):
+            depth, j = _depth(lines[i]), i
+            while depth > 0 and j + 1 < n:
+                j += 1
+                depth += _depth(lines[j])
+            if depth > 0:
+                raise RuntimeError("unbalanced braces from template line %d" % (i + 1))
+            return j
+
+        lines = text.splitlines()
+        out, dropped, swapped = [], [], []
+        i, n = 0, len(lines)
+        while i < n:
+            line = lines[i]
+            if line.startswith("define_window_layout_xml"):
+                i = _block_end(i) + 1
+                continue
+            if line.startswith("#") or line.startswith("version "):
+                i += 1
+                continue
+            match = re.match(r"^([A-Za-z_][\w.]*) \{$", line)
+            if not match:
+                out.append(line)
+                i += 1
+                continue
+            j = _block_end(i)
+            block = lines[i:j + 1]
+            i = j + 1
+            cls = match.group(1)
+            name = ""
+            for b in block:
+                if b.startswith(" name "):
+                    name = b[len(" name "):].strip()
+                    break
+            if cls == "Root" or cls in drop_classes:
+                dropped.append(name or cls)
+                continue
+            if cls in substitute:
+                new_name, label = substitute[cls]
+                keep = [b for b in block
+                        if b.startswith((" inputs ", " xpos ", " ypos "))]
+                block = (["NoOp {", " name %s" % new_name] + keep
+                         + [" label \"%s\"" % label, " tile_color 0xff0000ff", "}"])
+                if cls not in quiet:
+                    swapped.append("%s (%s)" % (name or cls, cls))
+            out.extend(block)
+        return "\n".join(out) + "\n", dropped, swapped
+
+    def _build_dasgrain_template(self, read_plates):
+        """Paste dasgraintemplate.nk around the primary plate Read.
+
+        The "MAIN PLATE HERE" placeholder (a Constant) is replaced by the
+        Read, and the whole template is moved so the Read sits where the
+        placeholder was. "DEGRAIN PLATE HERE" stays a black Constant (Mark,
+        2026-11-21) until the artist reads in the degrain render. The
+        template's Viewer is left out and its Flow Write is replaced by a
+        NoOp marker; _build_color_template builds both for this shot.
+
+        Returns {"write_in", "write_pos", "viewer_pos"}, or None - with the
+        reason in the build message - so the caller uses the previous
+        built-in layout instead. Never raises."""
+        import tempfile
+        self._template_note = "not used"
+        path = self._dasgrain_template_path()
+        tmp = None
+        pasted = []
+        try:
+            if not os.path.isfile(path):
+                self._template_note = "NOT USED - %s not found" % path
+                return None
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            substitute = {TEMPLATE_WRITE_CLASS: (TEMPLATE_WRITE_MARKER, "Flow Write goes here")}
+            if NEATVIDEO_CLASS in raw and not self._node_class_available(NEATVIDEO_CLASS):
+                substitute[NEATVIDEO_CLASS] = (
+                    "NeatVideo_not_installed",
+                    "Neat Video is not installed on this machine -\\n"
+                    "replace with Reduce Noise v5")
+            text, dropped, swapped = self._template_paste_text(
+                raw, TEMPLATE_DROP_CLASSES, substitute, quiet=(TEMPLATE_WRITE_CLASS,))
+            nanfix_fixed = text.count(TEMPLATE_NANFIX_BAD_EXPR)
+            text = text.replace(TEMPLATE_NANFIX_BAD_EXPR, "false")
+
+            fd, tmp = tempfile.mkstemp(prefix="buf_newfile_", suffix=".nk")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            for node in nuke.selectedNodes():
+                node.setSelected(False)
+            before = set(n.name() for n in nuke.allNodes())
+            nuke.nodePaste(tmp.replace("\\", "/"))
+            pasted = [n for n in nuke.allNodes() if n.name() not in before]
+            for node in nuke.allNodes():
+                node.setSelected(False)
+
+            def _find(pred):
+                for node in pasted:
+                    try:
+                        if pred(node):
+                            return node
+                    except Exception:
+                        pass
+                return None
+
+            plate_dot = _find(lambda n: n.Class() == "Dot" and
+                              n["label"].value().strip() == TEMPLATE_PLATE_LABEL)
+            marker = _find(lambda n: n.Class() == "NoOp" and
+                           n.name().startswith(TEMPLATE_WRITE_MARKER))
+            if plate_dot is None or plate_dot.input(0) is None:
+                raise RuntimeError("no Dot labelled %r with a placeholder "
+                                   "input in the template" % TEMPLATE_PLATE_LABEL)
+            if marker is None or marker.input(0) is None:
+                raise RuntimeError("no connected %s in the template"
+                                   % TEMPLATE_WRITE_CLASS)
+
+            placeholder = plate_dot.input(0)
+            dx = read_plates.xpos() - placeholder.xpos()
+            dy = read_plates.ypos() - placeholder.ypos()
+            for node in pasted:
+                node.setXYpos(node.xpos() + dx, node.ypos() + dy)
+            plate_dot.setInput(0, read_plates)
+            nuke.delete(placeholder)
+
+            write_in = marker.input(0)
+            write_pos = (marker.xpos(), marker.ypos())
+            nuke.delete(marker)
+            pasted = []  # kept from here on
+
+            notes = []
+            nanfix = nuke.toNode(TEMPLATE_NANFIX_NODE)
+            if nanfix is not None:
+                if "nanfix" not in nanfix.knobs():
+                    nanfix.addKnob(nuke.Tab_Knob("buf_tab", "NaN fix"))
+                    nanfix.addKnob(nuke.Boolean_Knob("nanfix", "fix NaN pixels"))
+                    nanfix["nanfix"].setValue(True)
+                nanfix["disable"].setExpression("!nanfix")
+            else:
+                notes.append("no %s node" % TEMPLATE_NANFIX_NODE)
+            if not nanfix_fixed:
+                notes.append("%r not found - NaN fix expression left as is"
+                             % TEMPLATE_NANFIX_BAD_EXPR)
+
+            dasgrain = None
+            diff = None
+            for node in nuke.allNodes():
+                if (dasgrain is None and node.Class() == "Group"
+                        and node.name().startswith(DASGRAIN_GROUP_PREFIX)):
+                    dasgrain = node
+                if diff is None and node.Class() == "Difference":
+                    diff = node
+            self._regrain_note = (
+                "%s from the template, %s" % (
+                    dasgrain.name(),
+                    "DISABLED - read in the degrain render at DEGRAIN PLATE "
+                    "HERE, Analyze, then enable"
+                    if dasgrain["disable"].value() else "enabled")
+                if dasgrain is not None else "NOT IN TEMPLATE")
+            self._qc_note = ("%s from the template (not rendered)" % diff.name()
+                             if diff is not None else "not in the template")
+            if swapped:
+                notes.append("replaced: %s" % ", ".join(swapped))
+            mtime = time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(path)))
+            self._template_file_note = "%s (modified %s)" % (
+                os.path.basename(path), mtime)
+            self._template_note = "%s%s" % (
+                self._template_file_note,
+                ("  [%s]" % "; ".join(notes)) if notes else "")
+            self._debug_log("dasgrain template: %s; dropped %s"
+                            % (self._template_note, dropped))
+            return {
+                "write_in": write_in,
+                "write_pos": write_pos,
+                "viewer_pos": (write_pos[0], write_pos[1] + TEMPLATE_VIEWER_BELOW_WRITE),
+            }
+        except Exception as exc:
+            import traceback as _tb
+            for node in pasted:
+                try:
+                    nuke.delete(node)
+                except Exception:
+                    pass
+            self._template_note = "NOT USED - error: %s" % exc
+            self._debug_log("dasgrain template failed: %r\n%s"
+                            % (exc, _tb.format_exc()))
+            return None
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+    def _bg01_effect_instructions(self, context):
+        """(BG01 plate code or None, instructions text or None, note).
+        Raises if Flow can't be read."""
+        ps, data = self._flow_plates(context)
+        plate, how = ps.pick_bg01(data["plates"])
+        if plate is None:
+            return None, None, how
+        code = ps.plate_code(plate)
+        plate_type = data["entity_type"]
+        field = ps.resolve_field(ps._field_schema(self._sg(), plate_type),
+                                 EFFECT_INSTRUCTIONS_FIELD)
+        if field is None:
+            return code, None, "no %s field on Flow %s" % (
+                EFFECT_INSTRUCTIONS_FIELD, plate_type)
+        if field in plate:
+            value = plate.get(field)
+        else:
+            row = self._sg().find_one(plate_type, [["id", "is", plate["id"]]],
+                                      [field]) or {}
+            value = row.get(field)
+        value = str(value).strip() if value is not None else ""
+        if not value:
+            return code, None, "%s is empty on %s" % (field, code)
+        return code, value, "from %s.%s" % (code, field)
+
+    @staticmethod
+    def _note_text(text, width=70):
+        """Wrap free text and escape it for a StickyNote label, which is
+        TCL-evaluated: [...] would run as a command and $ as a variable."""
+        import textwrap
+        lines = []
+        for para in str(text).replace("\r\n", "\n").split("\n"):
+            lines.extend(textwrap.wrap(para, width) or [""])
+        out = "\n".join(lines)
+        for old, new in (("\\", "\\\\"), ("[", "\\["), ("$", "\\$")):
+            out = out.replace(old, new)
+        return out
+
+    def _add_info_notes(self, context, origin, tpl):
+        """Two StickyNotes above the plate Read: which template built this
+        script, and BG01's effect instructions from Flow. Never raises."""
+        import datetime
+        import getpass
+
+        def _sticky(name, label, x_offset, tile):
+            note = nuke.toNode(name)
+            if note is None:
+                note = nuke.nodes.StickyNote(name=name)
+            note["label"].setValue(label)
+            try:
+                note["note_font_size"].setValue(INFO_NOTE_FONT_SIZE)
+                note["tile_color"].setValue(tile)
+            except Exception:
+                pass
+            # Notes grow downwards, so lift each one by its own height.
+            est = 30 + int((label.count("\n") + 1) * INFO_NOTE_FONT_SIZE * 1.4)
+            note.setXYpos(origin[0] + x_offset, origin[1] - INFO_NOTE_GAP - est)
+            return note
+
+        try:
+            try:
+                user = getpass.getuser()
+            except Exception:
+                user = "unknown"
+            layout = (getattr(self, "_template_file_note", "dasgraintemplate.nk")
+                      if tpl is not None else
+                      "previous built-in layout - template %s" % self._template_note)
+            _sticky(TEMPLATE_NOTE_NAME,
+                    "NEW FILE TEMPLATE  v%s  (%s)\nregrain layout: %s\nbuilt %s by %s"
+                    % (NEWFILE_TEMPLATE_VERSION, NEWFILE_TEMPLATE_DATE,
+                       self._note_text(layout),
+                       datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                       self._note_text(user)),
+                    0, 0x5A5A5AFF)
+            self._template_version_note = "v%s (%s)" % (
+                NEWFILE_TEMPLATE_VERSION, NEWFILE_TEMPLATE_DATE)
+        except Exception as exc:
+            self._template_version_note = "note NOT ADDED - error: %s" % exc
+            self._debug_log("template note failed: %r" % exc)
+
+        try:
+            try:
+                code, text, how = self._bg01_effect_instructions(context)
+            except Exception as exc:
+                code, text, how = None, None, "Flow read failed (%s)" % exc
+            title = "BG01 EFFECT INSTRUCTIONS%s" % (
+                ("  -  %s" % code) if code else "")
+            body = self._note_text(text) if text else "(none - %s)" % self._note_text(how)
+            _sticky(EFFECT_NOTE_NAME, "%s\n\n%s" % (title, body),
+                    EFFECT_NOTE_X, 0x7A6A2AFF)
+            self._effect_note = ("added %s" % how) if text else ("added, empty - %s" % how)
+        except Exception as exc:
+            self._effect_note = "NOT ADDED - error: %s" % exc
+            self._debug_log("effect instructions note failed: %r" % exc)
+        self._debug_log("info notes: template %s; BG01 instructions %s"
+                        % (getattr(self, "_template_version_note", "?"),
+                           self._effect_note))
+
+    def _template_summary(self):
+        return "%s - %s" % (getattr(self, "_template_version_note", "no note"),
+                            getattr(self, "_template_note", "not used"))
+
+    def _effect_summary(self):
+        return getattr(self, "_effect_note", "not added")
 
     def _regrain_summary(self):
         return getattr(self, "_regrain_note", "not added")
@@ -1175,28 +1569,36 @@ class SceneOperation(HookClass):
         # relative to the primary Read.
         origin = (read_plates.xpos(), read_plates.ypos())
 
-        # ── Dot: branch (comp line + DeGrained PLATE line) ────────────────
-        dot_branch = nuke.createNode("Dot", inpanel=False)
-        dot_branch.setInput(0, read_plates)
-        self._place(dot_branch, "branch", origin)
+        # STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21: the regrain / degrain
+        # layout comes from dasgraintemplate.nk. The NEWFILE_LAYOUT main line
+        # below is only the fallback when the template can't be used.
+        tpl = self._build_dasgrain_template(read_plates)
+        if tpl is not None:
+            dot_working = None
+            dot_write = tpl["write_in"]
+        else:
+            # ── Dot: branch (comp line + DeGrained PLATE line) ────────────────
+            dot_branch = nuke.createNode("Dot", inpanel=False)
+            dot_branch.setInput(0, read_plates)
+            self._place(dot_branch, "branch", origin)
 
-        # ── Dot: ACEScg working ───────────────────────────────────────────
-        dot_working = nuke.createNode("Dot", inpanel=False)
-        dot_working.setInput(0, dot_branch)
-        dot_working["label"].setValue("ACEScg working")
-        self._place(dot_working, "working", origin)
+            # ── Dot: ACEScg working ───────────────────────────────────────────
+            dot_working = nuke.createNode("Dot", inpanel=False)
+            dot_working.setInput(0, dot_branch)
+            dot_working["label"].setValue("ACEScg working")
+            self._place(dot_working, "working", origin)
 
-        # STUDIO_NO_VFX_PULL_READ_2026_10_28: no VFX PULL placeholder Read / Merge any more.
+            # STUDIO_NO_VFX_PULL_READ_2026_10_28: no VFX PULL placeholder Read / Merge any more.
 
-        # ── Regrain: DasGrain after the comp area (STUDIO_NEWFILE_REGRAIN_QC_2026_10_28) ──
-        # Two steps of empty space below "ACEScg working" for the comp.
-        comp_out = self._build_regrain(read_plates, dot_working, dot_branch, origin)
+            # ── Regrain: DasGrain after the comp area (STUDIO_NEWFILE_REGRAIN_QC_2026_10_28) ──
+            # Two steps of empty space below "ACEScg working" for the comp.
+            comp_out = self._build_regrain(read_plates, dot_working, dot_branch, origin)
 
-        # ── Dot: to Write ─────────────────────────────────────────────────
-        dot_write = nuke.createNode("Dot", inpanel=False)
-        dot_write.setInput(0, comp_out)
-        dot_write["label"].setValue("to Write")
-        self._place(dot_write, "to_write", origin)
+            # ── Dot: to Write ─────────────────────────────────────────────────
+            dot_write = nuke.createNode("Dot", inpanel=False)
+            dot_write.setInput(0, comp_out)
+            dot_write["label"].setValue("to Write")
+            self._place(dot_write, "to_write", origin)
 
         # ── Write: TK Write Node (Step-based EXR preset) ────────────
         # We use tk-nuke-writenode's WriteTank gizmo so the file path is
@@ -1269,14 +1671,21 @@ class SceneOperation(HookClass):
             )
             self._place(write, "write", origin)
 
+        if tpl is not None:  # STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21
+            write.setXYpos(*tpl["write_pos"])
+
         # ── Viewer ────────────────────────────────────────────────────────
         viewer = nuke.createNode("Viewer", inpanel=False)
         viewer.setInput(0, dot_write)
         viewer["label"].setValue("Display via OCIO viewer LUT")
         self._place(viewer, "viewer", origin)
+        if tpl is not None:  # STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21
+            viewer.setXYpos(*tpl["viewer_pos"])
         self._apply_cut_marks(near=write)  # STUDIO_NEWFILE_CUT_MARKS_2026_10_28
-        self._build_difference_qc(dot_working, dot_write, origin)  # STUDIO_NEWFILE_LAYOUT_2026_11_03
+        if tpl is None:  # template has its own Difference
+            self._build_difference_qc(dot_working, dot_write, origin)  # STUDIO_NEWFILE_LAYOUT_2026_11_03
         self._auto_plate_lineup(context, engine)  # STUDIO_NEWFILE_AUTO_LINEUP_2026_11_16
+        self._add_info_notes(context, origin, tpl)  # STUDIO_NEWFILE_DASGRAIN_TEMPLATE_2026_11_21
 
         plate_summary = (
             "\n".join(
@@ -1301,12 +1710,15 @@ class SceneOperation(HookClass):
             "  → preset: %s (Step-based default)\n\n"
             "Regrain (DasGrain) : %s\n"
             "QC (Difference)    : %s\n"
-            "Plate Lineup       : %s\n\n"
+            "Plate Lineup       : %s\n"
+            "Template           : %s\n"
+            "BG01 instructions  : %s\n\n"
             "Nuke's project directory has been set to this shot's folder.\n\n"
             "Review QTs are generated externally from EXR renders.\n"
             "Viewer display is handled by the OCIO viewer LUT."
             % (shot, self._frame_range_summary(), self._cut_summary(),
                plate_summary, render_path,
                write_preset, self._regrain_summary(), self._qc_summary(),
-               self._lineup_summary())
+               self._lineup_summary(), self._template_summary(),
+               self._effect_summary())
         )

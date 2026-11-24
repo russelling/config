@@ -8,6 +8,7 @@ STUDIO_PLATE_LINEUP_PANE_2026_11_03
 STUDIO_PLATE_LINEUP_SWITCH_2026_11_03
 STUDIO_PLATE_LINEUP_PRIMARY_RANGE_2026_11_16
 STUDIO_PLATE_LINEUP_BG_FG_EL_2026_11_16
+STUDIO_PLATE_LINEUP_LEAN_2026_11_16
 
 For every plate of a shot (BG, EL, FG ...), pulls the lineup data off
 Flow Production Tracking and (on request) builds the nodes that line each
@@ -39,7 +40,11 @@ WHAT IT DOES
    plate's Read (an existing Read of that sequence is reused; otherwise one
    is made by plate_reads.make_read, exactly as Load Shot Plates would):
 
-       Read -> TimeOffset | TimeWarp -> FrameRange (shot sg_cut_in..out)
+       Read -> TimeOffset | TimeWarp
+
+   (STUDIO_PLATE_LINEUP_LEAN_2026_11_16: no FrameRange any more - it only
+   repeated the script range. The existing Read is found by
+   plate_reads.path_key, so New File's Reads are reused.)
 
    TimeWarp when Flow has timewarp keyframes, TimeOffset otherwise. The
    nodes are tagged; running it again replaces this tool's nodes for that
@@ -171,8 +176,8 @@ def plan_plate(ps, plate, fields, shot_rng, disk_rng, mode=None):
     if kf_problem:
         problems.append(kf_problem)
     if sf is None:
-        notes.append("Shot has no %s/%s on Flow -- no FrameRange, and "
-                     "relative keyframes cannot be placed."
+        notes.append("Shot has no %s/%s on Flow -- relative keyframes "
+                     "cannot be placed."
                      % (ps.SG_FRAME_IN_FIELD, ps.SG_FRAME_OUT_FIELD))
     if df is None:
         notes.append("Not found on disk under plates/ -- report only.")
@@ -697,16 +702,16 @@ def _set(node, knob, value, failures):
         return False
 
 
-def _existing_read(record):
-    import nuke
-    want = os.path.normpath(record["nuke_path"].replace("\\", "/"))
-    for node in nuke.allNodes("Read"):
-        try:
-            if os.path.normpath(node["file"].value()) == want:
-                return node
-        except Exception:
-            continue
-    return None
+def _existing_read(record, pr):
+    """The Read already in the script for this plate (plate_reads.find_read,
+    matched on path_key). STUDIO_PLATE_LINEUP_LEAN_2026_11_16"""
+    return pr.find_read(record)
+
+
+def _short(ps, code):
+    """'EL04' for '302_038_0040_EL04_V001'; the code if it names no element."""
+    key = ps.element_key(code)
+    return ps.element_label(key) if key else code
 
 
 def _remove_previous(code):
@@ -746,7 +751,7 @@ def build_nodes(g, bg_only=False):
 
         for selected in nuke.selectedNodes():
             selected.setSelected(False)
-        read = _existing_read(record)
+        read = _existing_read(record, pr)
         read_note = "existing Read %s" % read.name() if read else None
         if read is None:
             read = pr.make_read(record, primary=False,
@@ -773,22 +778,17 @@ def build_nodes(g, bg_only=False):
             _set(retime, "time_offset", plan["offset"], failures)
         retime.setInput(0, read)
         retime.setXYpos(x, y)
-        retime["label"].setValue("LINEUP %s\n%s" % (code, summary))
+        # STUDIO_PLATE_LINEUP_LEAN_2026_11_16: short label, no FrameRange.
+        if plan["kind"] == "timewarp":
+            short = "%s timewarp (%d keys)" % (_short(ps, code), len(plan["tw_keys"]))
+        elif plan.get("first_at") is not None:
+            short = "%s \u2192 %g" % (_short(ps, code), plan["first_at"])
+        else:
+            short = "%s %+d" % (_short(ps, code), plan["offset"])
+        retime["label"].setValue(short)
         _tag(retime, code, summary)
         built = [retime.name()]
-
-        if plan["frame_range"]:
-            fr = nuke.nodes.FrameRange()
-            _set(fr, "first_frame", plan["frame_range"][0], failures)
-            _set(fr, "last_frame", plan["frame_range"][1], failures)
-            fr.setInput(0, retime)
-            fr.setXYpos(x, y + NODE_SPACING_Y)
-            fr["label"].setValue("shot %d-%d" % plan["frame_range"])
-            _tag(fr, code, summary)
-            built.append(fr.name())
-            g["_tails"][code] = fr
-        else:
-            g["_tails"][code] = retime
+        g["_tails"][code] = retime
 
         line = "%s: %s -> %s%s" % (code, read_note, " -> ".join(built),
                                    " (replaced %d old)" % removed if removed else "")
@@ -890,7 +890,9 @@ def build_switch(g):
     xs = [tails[st["code"]].xpos() for st in steps]
     ys = [tails[st["code"]].ypos() for st in steps]
     switch.setXYpos(int(sum(xs) / len(xs)), max(ys) + NODE_SPACING_Y + 50)
-    switch["label"].setValue("LINEUP SWITCH\n" + sw["text"].replace(" -> ", "\n"))
+    # STUDIO_PLATE_LINEUP_LEAN_2026_11_16: frames shown = the keys.
+    switch["label"].setValue("EL SWITCH\n" + "\n".join(
+        "%s %g" % (_short(g["ps"], st["code"]), st["first"]) for st in steps))
     _tag(switch, SWITCH_TAG, "stepped at each element's FFOA: " + sw["text"])
     lines = ["Lineup Switch %s: %s" % (switch.name(), "; ".join(
         "input %d %s from %g" % (i, st["code"], st["first"])
@@ -1152,7 +1154,7 @@ def _pane_class():
             if not item["record"]:
                 nuke.message("%s is not on disk." % self._g["ps"].plate_code(item["plate"]))
                 return
-            read = _existing_read(item["record"])
+            read = _existing_read(item["record"], self._g["pr"])
             if read is None:
                 nuke.message("No Read of this plate in the script yet -- "
                              "Build Lineup Nodes (or Load Shot Plates) makes one.")
